@@ -55,7 +55,7 @@ Initialize communication
 ----------------------------------
 SAR uses the `torch.distributed <https://pytorch.org/docs/stable/distributed.html>`_ package to handle all communication. See the :ref:`Communication Guide <comm-guide>`  for more information on the communication routines. We require the IP address of the master worker/machine (the machine with rank 0) to initialize the ``torch.distributed`` package. In an environment with a networked file system where all workers/machines share a common file system, we can communicate the master's IP address through the file system. In that case, use :func:`sar.nfs_ip_init` to obtain the master ip address.
 
-Initialize the communication through a call to :func:`sar.initialize_comms` , specifying the current worker index, the total number of workers (which should be the same as the number of partitions from step 1, the master's IP address, and the communication device. The later is the device on which SAR should place the tensors before sending them through the communication backend.   For example: ::
+Initialize the communication through a call to :func:`sar.initialize_comms` , specifying the current worker index, the total number of workers (which should be the same as the number of partitions from step 1), the master's IP address, and the communication device. The later is the device on which SAR should place the tensors before sending them through the communication backend.   For example: ::
 
   if backend_name == 'nccl':
       comm_device = torch.device('cuda')

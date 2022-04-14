@@ -32,6 +32,7 @@ Relevant methods
 .. autosummary::
    :toctree: comm package
 
+   initialize_comms
    rank
    world_size
    sync_params

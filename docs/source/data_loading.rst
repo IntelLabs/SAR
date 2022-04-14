@@ -9,17 +9,17 @@ After partitioning the graph using DGL's `partition_graph <https://docs.dgl.ai/e
     :depth: 2
 
 
-Constructing the full graph for sequential aggregation
+Constructing the full graph for sequential aggregation and rematerialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Construct a single distributed graph object of type :class:`sar.GraphShardManager`::
+Construct a single distributed graph object of type :class:`sar.core.GraphShardManager`::
 
     shard_manager = sar.construct_full_graph(partition_data)
 
 ..
 
-The ``GraphShardManager`` object encapsulates N DGL graph objects (where N is the number of workers). Each graph object represents the edges incoming from one partition (including the local partition). ``GraphShardManager`` implements the ``update_all`` and ``apply_edges`` methods in addition to several other methods from the standard  ``dgl.heterograph.DGLheterograph`` API.  The ``update_all`` and ``apply_edges`` methods implement the sequential aggregation and rematerialization scheme to realize the distributed forward and backward passes. ``GraphShardManager`` can usually be passed to GNN layers instead of ``dgl.heterograph.DGLheterograph``.
+The ``GraphShardManager`` object encapsulates N DGL graph objects (where N is the number of workers). Each graph object represents the edges incoming from one partition (including the local partition). ``GraphShardManager`` implements the ``update_all`` and ``apply_edges`` methods in addition to several other methods from the standard  ``dgl.heterograph.DGLHeterograph`` API.  The ``update_all`` and ``apply_edges`` methods implement the sequential aggregation and rematerialization scheme to realize the distributed forward and backward passes. ``GraphShardManager`` can usually be passed to GNN layers instead of ``dgl.heterograph.DGLHeterograph``. See the :ref:`the distributed graph limitations section<shard-limitations>` for some exceptions.
 
-Constructing Message Flow Graphs (MFGs) for sequential aggregation
+Constructing Message Flow Graphs (MFGs) for sequential aggregation and rematerialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 In node classification tasks, gradients only backpropagate from the labeled nodes. DGL uses the concept of message flow graphs to construct layer-specific bi-partite graphs that update only a subset of nodes in each layer. These are the nodes  that will ultimately affect the output, assuming each node only aggregates messages from its neighbors in every layer.
 
@@ -53,7 +53,7 @@ Using message flow graphs at each layer can substantially lower run-time and mem
 
 Constructing full graph or MFGs for one-shot aggregation 
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-As described in the the :ref:`training modes <sar-modes>`, SAR supports doing one-shot distributed aggregation (mode 3). To run in this mode, you should extract the full partition graph from the :class:`sar.GraphShardManager` object and use that during training. When using the full graph:
+As described in the the :ref:`training modes <sar-modes>`, SAR supports doing one-shot distributed aggregation (mode 3). To run in this mode, you should extract the full partition graph from the :class:`sar.core.GraphShardManager` object and use that during training. When using the full graph:
 ::
 
     shard_manager = sar.construct_full_graph(partition_data)
