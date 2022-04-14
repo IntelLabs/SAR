@@ -3,7 +3,7 @@
 
 Sequential Aggregation and Rematerialization (SAR) is a pure Python library for distributed full-batch training of Graph Neural Networks (GNNs) on large graphs. SAR is built on top of PyTorch and DGL. SAR is particularly suited for training GNNs on large graphs as it guarantees linear memory scaling, i.e, the memory needed to store the GNN activiations in each host is guaranteed to go down linearly with the number of hosts, even for densely connected graphs.
 
-SAR requires minimal changes to existing GNN training code. SAR directly uses the graph partitioning data created by [DGL's partitioning tools](https://docs.dgl.ai/en/0.6.x/generated/dgl.distributed.partition.partition_graph.html) and can thus be used as a drop-in replacement for DGL's distributed sampling-based training. To get started using SAR, check out [SAR's documentation](https://intel-sandbox.github.io/libraries.ai.graph-networks.distributed-gcns) and the examples under the `examples/` folder.
+SAR requires minimal changes to existing GNN training code. SAR directly uses the graph partitioning data created by [DGL's partitioning tools](https://docs.dgl.ai/en/0.6.x/generated/dgl.distributed.partition.partition_graph.html) and can thus be used as a drop-in replacement for DGL's distributed sampling-based training. To get started using SAR, check out [SAR's documentation](https://sar.readthedocs.io/en/latest/) and the examples under the `examples/` folder.
 
 
 ## Installing required packages
