@@ -1,0 +1,5 @@
+dgl
+numpy
+ogb
+torch
+ifaddr
