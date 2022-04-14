@@ -18,7 +18,8 @@ Keep in mind that the distributed graph class :class:`sar.core.GraphShardManager
 
 :class:`sar.core.GraphShardManager` also supports the ``in_degrees`` and ``out_degrees`` members and supports querying the number of nodes and edges in the graph. 
 
-
+The ``update_all`` method in :class:`sar.core.GraphShardManager` only supports the 4 standard reduce functions in dgl: ``max``, ``min``, ``sum``, and ``mean``. The reason behind this is that SAR runs a sequential reduction of messages and therefore requires that :math:`reduce(msg_1,msg_2,msg_3) = reduce(msg_1,reduce(msg_2,msg_3))`. 
+       
 .. currentmodule:: sar.core
 
 

@@ -161,8 +161,8 @@ def construct_mfgs(partition_data: PartitionData,
     :type seed_nodes: Tensor
     :param n_layers: The number of layers in the GNN
     :type n_layers: int
-    :param keep_seed_nodes: Keep the 
-    :type n_layers: int
+    :param keep_seed_nodes: Keep the seed nodes as part of the source nodes. Default: True 
+    :type keep_seed_nodes: bool
 
 
     :returns: A list of GraphShardManager objects, one for each layer

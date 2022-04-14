@@ -44,7 +44,7 @@ Mode 1 is the default mode. It runs automatically when you pass a :class:`sar.co
     
 .. 
 
-Mode 1 is the most memory-efficient mode. Excluding the GNN parameters which are replicated across all workers, mode 1 guarantees that memory consumption per worker will go down linearly with the number of workers used in training, even for densely connected graphs. 
+Mode 1 is the most memory-efficient mode. Excluding the GNN parameters which are replicated across all workers, mode 1 guarantees that peak memory consumption per worker will go down linearly with the number of workers used in training, even for densely connected graphs. 
             
 Mode 2: Sequential aggregation
 ------------------------------------------------------------------------------------
@@ -80,7 +80,7 @@ In mode 3, the one-shot aggregation mode, each worker fetches all remote data in
     :alt: One shot aggregation
     :width: 500 px
 
-One advantage of mode 3 is that it only requires one communication round per layer in each of the forward and backward passes. One disadvantage is that mode 3 does not hide the communication latency. Due to the sequential nature of modes 1 and 2, SAR is able to simultaneously process data from one remote partition wnile pre-fetching data from the next remote partition in the aggregation sequence. Modes 1 and 2 can thus better hide the communication latency than mode 3. The memory requirements of mode 3 are similar to mode 2.
+One advantage of mode 3 is that it only requires one communication round per layer in each of the forward and backward passes. One disadvantage is that mode 3 does not hide the communication latency. Due to the sequential nature of modes 1 and 2, SAR is able to simultaneously process data from one remote partition while pre-fetching data from the next remote partition in the aggregation sequence. Modes 1 and 2 can thus better hide the communication latency than mode 3. The memory requirements of mode 3 are similar to mode 2.
 
 To train in mode 3, you should extract the full partition graph from the :class:`sar.core.GraphShardManager` object and use that during training.
 ::

@@ -142,7 +142,6 @@ def initialize_comms(_rank: int, _world_size: int, master_ip: str,
     :param _comm_device:  The device on which the tensors should be on in order to transmit them\
     through the backend. If not provided, the device is infered based on the backend type
     :type _comm_device: torch.device
-    :returns: 
 
     """
     assert backend in ['ccl', 'nccl', 'mpi'], 'backend must be ccl,nccl, or mpi'
