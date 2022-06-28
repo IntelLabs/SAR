@@ -88,7 +88,8 @@ def _get_type_ordered_edges(edge_mask: Tensor, edge_types: Tensor,
 
 
 def load_dgl_partition_data(partition_json_file: str,
-                            own_partition_idx: int, device: torch.device) -> PartitionData:
+                            own_partition_idx: int, 
+                            disable_cut_edges: bool, device: torch.device) -> PartitionData:
     """
     Loads partition data created by DGL's ``partition_graph`` function
 
@@ -145,8 +146,12 @@ def load_dgl_partition_data(partition_json_file: str,
 
     for part_idx in range(partition_book.num_partitions()):
         # obtain the mask for edges originating from partition part_idx
-        edge_mask = torch.logical_and(partition_edges[0] >= node_ranges[part_idx][0],
-                                      partition_edges[0] < node_ranges[part_idx][1])
+        if disable_cut_edges and own_partition_idx != part_idx:
+            edge_mask = torch.zeros_like(partition_edges[0]).bool()
+        else:
+            edge_mask = torch.logical_and(partition_edges[0] >= node_ranges[part_idx][0],
+                                        partition_edges[0] < node_ranges[part_idx][1])
+            
 
         # Reorder the edges in each shard so that edges with the same type
         # follow each other
