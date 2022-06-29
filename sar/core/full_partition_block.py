@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 import logging
 from collections.abc import MutableMapping
 import torch
@@ -40,11 +40,17 @@ class ProxyDataView(MutableMapping):
 
     def __init__(self, tensor_sz: int, base_dict: MutableMapping,
                  indices_required_from_me: List[Tensor],
-                 sizes_expected_from_others:  List[int]):
+                 sizes_expected_from_others:  List[int],
+                 compressors: Union[torch.nn.Module, List[torch.nn.Module]],
+                 decompressors: Union[torch.nn.Module, List[torch.nn.Module]],
+                 channel_type: str):
         self.base_dict = base_dict
         self.tensor_sz = tensor_sz
         self.indices_required_from_me = indices_required_from_me
         self.sizes_expected_from_others = sizes_expected_from_others
+        self.compressors = compressors
+        self.decompressors = decompressors
+        self.channel_type = channel_type
 
     def set_base_dict(self, new_base_dict: MutableMapping):
         self.base_dict = new_base_dict
@@ -56,7 +62,8 @@ class ProxyDataView(MutableMapping):
 
         with profiler.record_function("COMM_FETCH"):
             exchange_result = tensor_exchange_op(
-                value, self.indices_required_from_me, self.sizes_expected_from_others)
+                value, self.indices_required_from_me, self.sizes_expected_from_others,
+                self.compressors, self.decompressors, self.channel_type)
 
         self.base_dict[key] = exchange_result
 
@@ -100,6 +107,9 @@ class DistributedBlock:
     :type seeds: Tensor
     :param edge_type_names: A list of edge type names 
     :type edge_type_names: List[str]
+    :param compressors: A list of learnable compressor modules for each remote client that compresses the outgoing
+    node features
+    :type compressors: List[torch.nn.Module]
 
     """
 
@@ -109,7 +119,10 @@ class DistributedBlock:
                  unique_src_nodes: List[Tensor],
                  input_nodes: Tensor,
                  seeds: Tensor,
-                 edge_type_names: List[str]):
+                 edge_type_names: List[str],
+                 compressors: Union[torch.nn.Module, List[torch.nn.Module]],
+                 decompressors: Union[torch.nn.Module, List[torch.nn.Module]],
+                 channel_type: str):
 
         self._block = block
         self.indices_required_from_me = indices_required_from_me
@@ -121,7 +134,11 @@ class DistributedBlock:
         self.seeds = seeds
 
         self.srcdata = ProxyDataView(input_nodes.size(0),
-                                     block.srcdata, indices_required_from_me, sizes_expected_from_others)
+                                     block.srcdata, indices_required_from_me, 
+                                     sizes_expected_from_others, 
+                                     compressors,
+                                     decompressors,
+                                     channel_type)
 
         self.out_degrees_cache: Dict[Optional[str], Tensor] = {}
 
@@ -160,17 +177,38 @@ class TensorExchangeOp(torch.autograd.Function):  # pylint: disable = abstract-m
     @ staticmethod
     # pylint: disable = arguments-differ,unused-argument
     def forward(ctx, val: Tensor, indices_required_from_me: Tensor,  # type: ignore
-                sizes_expected_from_others: Tensor) -> Tensor:  # type: ignore
+                sizes_expected_from_others: Tensor, 
+                compressors: Union[List[torch.nn.Module], torch.nn.Module],
+                decompressors: Union[List[torch.nn.Module], torch.nn.Module],
+                channel_type: str) -> Tensor:  # type: ignore
         ctx.sizes_expected_from_others = sizes_expected_from_others
         ctx.indices_required_from_me = indices_required_from_me
         ctx.input_size = val.size()
 
         send_tensors = [val[indices] for indices in indices_required_from_me]
+        if channel_type == "client":
+            # Client specific compression
+            send_tensors = [compressors[i](val) if i != rank() else val 
+                                for i, val in enumerate(send_tensors)]
+        elif channel_type == "fixed":
+            # Send data to each client using same compression module
+            #TODO: check if i means rank or not
+            send_tensors = [compressors(val) if i != rank() else val 
+                                for i, val in enumerate(send_tensors)]
+        
         recv_tensors = [val.new(sz_from_others, *val.size()[1:])
                         for sz_from_others in sizes_expected_from_others]
-
         all_to_all(recv_tensors, send_tensors, move_to_comm_device=True)
 
+        if channel_type == "client":
+            # Client specific decompression
+            recv_tensors = [decompressors[i](val) if i != rank() else val 
+                                for i, val in enumerate(recv_tensors)]
+        elif channel_type == "fixed":
+            # All received features are decompressed using the same module
+            recv_tensors = [decompressors(val) if i != rank() else val
+                                for i, val in enumerate(recv_tensors)]
+        
         return torch.cat(recv_tensors)
 
     @ staticmethod
