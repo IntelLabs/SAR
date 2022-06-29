@@ -44,7 +44,7 @@ parser.add_argument(
     help="Path to the .json file containing partitioning information "
 )
 
-parser.add_argument('--ip-file', default='./ip_file', type=str,
+parser.add_argument('--ip-file', default='ip_file.txt', type=str,
                     help='File with ip-address. Worker 0 creates this file and all others read it ')
 
 
@@ -58,10 +58,10 @@ parser.add_argument(
 )
 
 
-parser.add_argument('--train-iters', default=100, type=int,
+parser.add_argument('--train-iters', default=500, type=int,
                     help='number of training iterations ')
 
-parser.add_argument('--fed_agg_round', default=10, type=int, 
+parser.add_argument('--fed_agg_round', default=501, type=int, 
                     help='number of training iterations after \
                         which weights across clients will \
                             be aggregated')
@@ -69,12 +69,12 @@ parser.add_argument('--fed_agg_round', default=10, type=int,
 parser.add_argument(
     "--lr",
     type=float,
-    default=1e-2,
+    default=1e-3,
     help="learning rate"
 )
 
 
-parser.add_argument('--rank', default=0, type=int,
+parser.add_argument('--rank', default=1, type=int,
                     help='Rank of the current worker ')
 
 parser.add_argument('--world-size', default=2, type=int,
