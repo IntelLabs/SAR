@@ -83,11 +83,17 @@ parser.add_argument('--world-size', default=2, type=int,
 parser.add_argument('--hidden-layer-dim', default=256, type=int,
                     help='Dimension of GNN hidden layer')
 
-parser.add_argument('--log_dir', default="fed", type=str,
+parser.add_argument('--log_dir', default="log/fed", type=str,
                     help='Parent directory for logging')
 
 parser.add_argument('--disable_cut_edges', action="store_true", 
                     help="Stop embedding sharing between clients")
+
+parser.add_argument('--compression_ratio', default=None, type=float, 
+                    help="Compression ratio for client-wise compression channel-set")
+
+parser.add_argument('--n_kernel', default=None, type=int,
+                    help='Number of channels in the fixed compression channel-set')
 
 
 class GNNModel(nn.Module):
@@ -155,7 +161,9 @@ def main():
     num_labels = num_labels.item() 
     
     features = sar.suffix_key_lookup(partition_data.node_features, 'features').to(device)
-    full_graph_manager = sar.construct_full_graph(partition_data).to(device)
+    full_graph_manager = sar.construct_full_graph(
+        partition_data, features.size(1), args.compression_ratio, 
+        args.n_kernel).to(device)
 
     #We do not need the partition data anymore
     del partition_data
