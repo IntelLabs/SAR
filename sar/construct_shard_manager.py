@@ -183,7 +183,11 @@ def construct_mfgs(partition_data: PartitionData,
     return graph_shard_manager_list[::-1]
 
 
-def construct_full_graph(partition_data: PartitionData) -> GraphShardManager:
+def construct_full_graph(
+    partition_data: PartitionData,
+    feature_dim: int,
+    compression_ratio: float,
+    n_kernel: int) -> GraphShardManager:
     """
     Constructs a GraphShardManager object from the partition data. The GraphShardManager
     object can serve as a drop-in replacemet to DGL's native graph in most GNN layers
@@ -202,4 +206,6 @@ def construct_full_graph(partition_data: PartitionData) -> GraphShardManager:
     seed_nodes = torch.arange(partition_data.node_ranges[rank()][1] -
                               partition_data.node_ranges[rank()][0])
     return GraphShardManager(graph_shard_list,
-                             seed_nodes, seed_nodes)
+                             seed_nodes, seed_nodes,
+                             feature_dim,
+                             compression_ratio, n_kernel)
