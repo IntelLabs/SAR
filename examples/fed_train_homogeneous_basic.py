@@ -44,7 +44,7 @@ parser.add_argument(
     help="Path to the .json file containing partitioning information "
 )
 
-parser.add_argument('--ip-file', default='ip_file.txt', type=str,
+parser.add_argument('--ip-file', default='./examples/ip_file.txt', type=str,
                     help='File with ip-address. Worker 0 creates this file and all others read it ')
 
 

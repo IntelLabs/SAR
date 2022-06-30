@@ -247,7 +247,9 @@ class GraphShardManager:
                 self.compressors = Compressor(feature_dim=feature_dim, n_kernel=n_kernel)
                 self.decompressors = [
                     Compressor(feature_dim=feature_dim, n_kernel=shard.unique_src_nodes.size(0)) 
-                    for shard in self.graph_shards]
+                    if i != rank() else torch.nn.Identity() 
+                    for i, shard in enumerate(self.graph_shards)
+                    ]
         else:
             # Separate compressors will be learned for each remote client 
             # with different number of channels
@@ -259,7 +261,9 @@ class GraphShardManager:
                 for src_indices in self.indices_required_from_me]
             self.decompressors = [
                     Compressor(feature_dim=feature_dim, n_kernel=shard.unique_src_nodes.size(0)) 
-                    for shard in self.graph_shards]
+                    if i != rank() else torch.nn.Identity() 
+                    for i, shard in enumerate(self.graph_shards)
+                    ]
 
         self.in_degrees_cache: Dict[Optional[str], Tensor] = {}
         self.out_degrees_cache: Dict[Optional[str], Tensor] = {}
