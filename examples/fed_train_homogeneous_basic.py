@@ -162,8 +162,7 @@ def main():
     
     features = sar.suffix_key_lookup(partition_data.node_features, 'features').to(device)
     full_graph_manager = sar.construct_full_graph(
-        partition_data, features.size(1), args.compression_ratio, 
-        args.n_kernel).to(device)
+        partition_data).to(device)
 
     #We do not need the partition data anymore
     del partition_data

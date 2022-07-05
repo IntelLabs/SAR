@@ -27,9 +27,12 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 import torch.distributed as dist
+from torch.utils.tensorboard import SummaryWriter
 import dgl  # type: ignore
 
 import sar
+from sar.core.full_partition_block import CompressorDecompressorBase
+from sar.config import Config
 
 
 parser = ArgumentParser(
@@ -102,6 +105,22 @@ parser.add_argument('--n-layers', default=3, type=int,
 parser.add_argument('--layer-dim', default=256, type=int,
                     help='Dimension of GNN hidden layer')
 
+parser.add_argument('--compression_ratio', default=None, type=float, 
+                    help="Compression ratio for client-wise compression channel-set")
+
+parser.add_argument('--n_kernel', default=None, type=int,
+                    help='Number of channels in the fixed compression channel-set')
+
+parser.add_argument('--log_dir', default="log/fed", type=str,
+                    help='Parent directory for logging')
+
+parser.add_argument('--disable_cut_edges', action="store_true", 
+                    help="Stop embedding sharing between clients")
+
+parser.add_argument('--fed_agg_round', default=501, type=int, 
+                    help='number of training iterations after \
+                        which weights across clients will \
+                            be aggregated')
 
 class GNNModel(nn.Module):
     def __init__(self,  gnn_layer: str, n_layers: int, layer_dim: int,
@@ -110,6 +129,7 @@ class GNNModel(nn.Module):
 
         assert n_layers >= 1, 'GNN must have at least one layer'
         dims = [input_feature_dim] + [layer_dim] * (n_layers-1) + [n_classes]
+        print(dims)
 
         self.convs = nn.ModuleList()
         for idx in range(len(dims) - 1):
@@ -130,6 +150,7 @@ class GNNModel(nn.Module):
     def forward(self,  blocks: List[Union[sar.GraphShardManager, sar.DistributedBlock]],
                 features: torch.Tensor):
         for idx, conv in enumerate(self.convs):
+            Config.current_layer_index = idx
             features = conv(blocks[idx], features)
             if features.ndim == 3:  # GAT produces an extra n_heads dimension
                 # collapse the n_heads dimension
@@ -137,7 +158,7 @@ class GNNModel(nn.Module):
 
             if idx < len(self.convs) - 1:
                 features = F.relu(features, inplace=True)
-
+            
         return features
 
 
@@ -211,7 +232,10 @@ def train_pass(gnn_model: torch.nn.Module,
                train_mask: torch.Tensor,
                labels: torch.Tensor,
                n_train_points: int,
-               mfg_blocks: bool):
+               mfg_blocks: bool,
+               train_iter_idx: int,
+               fed_agg_round: int
+               ):
 
     # If we had constructed MFGs, then the input nodes for the first block might be
     # a subset of the the nodes in the partition. Use the input_nodes member of
@@ -235,7 +259,9 @@ def train_pass(gnn_model: torch.nn.Module,
     optimizer.zero_grad()
     loss.backward()
     # Do not forget to gather the parameter gradients from all workers
-    sar.gather_grads(gnn_model)
+    if (train_iter_idx + 1) % fed_agg_round == 0:
+            sar.gather_grads(gnn_model)
+            print("Aggregating models across clients", flush=True)
     optimizer.step()
 
 
@@ -261,6 +287,8 @@ def main():
             args.world_size = int(os.environ["WORLD_SIZE"])
 
     use_gpu = torch.cuda.is_available() and not args.cpu_run
+    # Create log directory
+    writer = SummaryWriter(f"{args.log_dir}/ogbn-arxiv/lr={args.lr}/n_clients={args.world_size}/rank={args.rank}")
 
     device = torch.device('cuda' if use_gpu else 'cpu')
     if args.backend == 'nccl':
@@ -279,7 +307,7 @@ def main():
 
     # Load DGL partition data
     partition_data = sar.load_dgl_partition_data(
-        args.partitioning_json_file, args.rank, device)
+        args.partitioning_json_file, args.rank, False, device)
 
     # Obtain train,validation, and test masks
     # These are stored as node features. Partitioning may prepend
@@ -335,6 +363,14 @@ def main():
         full_graph_manager = sar.construct_full_graph(partition_data)
         if args.train_mode == 'one_shot_aggregation':
             full_graph_manager = full_graph_manager.get_full_partition_graph()
+            comp_mod = CompressorDecompressorBase(
+                    feature_dim=[features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels],
+                    compression_ratio=args.compression_ratio,
+                    n_kernel=args.n_kernel,
+                    indices_required_from_me=full_graph_manager.indices_required_from_me
+                ) #TODO: why -2 not -1?
+            full_graph_manager._compression_decompression = comp_mod
+
         full_graph_manager = full_graph_manager.to(device)
         train_blocks = [full_graph_manager] * args.n_layers
         eval_blocks = [full_graph_manager] * args.n_layers
@@ -369,6 +405,8 @@ def main():
     n_train_points = n_train_points.item()
 
     optimizer = torch.optim.Adam(gnn_model.parameters(), lr=args.lr)
+    best_val_acc = 0
+    model_acc = 0
     for train_iter_idx in range(args.train_iters):
         t_1 = time.time()
         train_pass(gnn_model,
@@ -378,7 +416,9 @@ def main():
                    masks['train_indices'],
                    labels,
                    n_train_points,
-                   args.construct_mfgs)
+                   args.construct_mfgs,
+                   train_iter_idx=train_iter_idx,
+                   fed_agg_round=args.fed_agg_round)
         train_time = time.time() - t_1
 
         (train_loss, train_acc, val_loss, val_acc, test_loss, test_acc) = \
@@ -388,7 +428,9 @@ def main():
                        masks,
                        labels,
                        args.construct_mfgs)
-
+        if val_acc >= best_val_acc:
+            best_val_acc = val_acc
+            model_acc = test_acc
         result_message = (
             f"iteration [{train_iter_idx}/{args.train_iters}] | "
         )
@@ -402,10 +444,17 @@ def main():
             f"train={train_acc:.4f} "
             f"valid={val_acc:.4f} "
             f"test={test_acc:.4f} "
+            f"model={model_acc:.4f}"
             f" | train time = {train_time} "
             f" |"
         ])
         print(result_message, flush=True)
+        # Tensorboard logging
+        writer.add_scalar("Accuracy/model", model_acc.item(), train_iter_idx)
+        writer.add_scalar("Accuracy/train", train_acc.item(), train_iter_idx)
+        writer.add_scalar("Accuracy/valid", val_acc.item(), train_iter_idx)
+        writer.add_scalar("Accuracy/test", test_acc.item(), train_iter_idx)
+        
 
 
 if __name__ == '__main__':

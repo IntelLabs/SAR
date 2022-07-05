@@ -52,3 +52,4 @@ class Config(object):
     disable_sr: bool = False
     max_collective_size: int = 0
     pipeline_depth: int = 1
+    current_layer_index: int = 0

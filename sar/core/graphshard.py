@@ -198,8 +198,7 @@ class GraphShardManager:
 
     """
 
-    def __init__(self, graph_shards: List[GraphShard], local_src_seeds: Tensor, local_tgt_seeds: Tensor, 
-                    feature_dim: int, compression_ratio: float, n_kernel: int) -> None:
+    def __init__(self, graph_shards: List[GraphShard], local_src_seeds: Tensor, local_tgt_seeds: Tensor) -> None:
         super().__init__()
         self.graph_shards = graph_shards
 
@@ -229,41 +228,22 @@ class GraphShardManager:
             0) == self.tgt_node_range[1] - self.tgt_node_range[0]
 
         self.indices_required_from_me = self.update_boundary_nodes_indices()
-        
-        if compression_ratio is None:
-            if n_kernel is None:
-                # Communication using cut-edges instead of learnable channels
-                self.sizes_expected_from_others = [
+        self.sizes_expected_from_others = [
                     shard.unique_src_nodes.size(0) for shard in self.graph_shards]
-                self.channel_type = "direct"
-                self.compressors = None
-                self.decompressors = None
-            else:
-                # Create fixed number of channels across all clients 
-                # the same compressor will be used for all remote clients
-                self.sizes_expected_from_others = [
-                    n_kernel for _ in self.graph_shards]
-                self.channel_type = "fixed"
-                self.compressors = Compressor(feature_dim=feature_dim, n_kernel=n_kernel)
-                self.decompressors = [
-                    Compressor(feature_dim=feature_dim, n_kernel=shard.unique_src_nodes.size(0)) 
-                    if i != rank() else torch.nn.Identity() 
-                    for i, shard in enumerate(self.graph_shards)
-                    ]
-        else:
-            # Separate compressors will be learned for each remote client 
-            # with different number of channels
-            self.sizes_expected_from_others = [
-                torch.floor(shard.unique_src_nodes.size(0) * compression_ratio) for shard in self.graph_shards]
-            self.channel_type = "client"
-            self.compressors = [
-                Compressor(feature_dim=feature_dim, n_kernel=torch.floor(compression_ratio * len(src_indices))) 
-                for src_indices in self.indices_required_from_me]
-            self.decompressors = [
-                    Compressor(feature_dim=feature_dim, n_kernel=shard.unique_src_nodes.size(0)) 
-                    if i != rank() else torch.nn.Identity() 
-                    for i, shard in enumerate(self.graph_shards)
-                    ]
+        # if compression_ratio is None:
+        #     if n_kernel is None:
+        #         # Communication using cut-edges instead of learnable channels
+        #         self.sizes_expected_from_others = [
+        #             shard.unique_src_nodes.size(0) for shard in self.graph_shards]
+        #     else:
+        #         # Create fixed number of channels across all clients 
+        #         self.sizes_expected_from_others = [
+        #             n_kernel for _ in self.graph_shards]
+        # else:
+        #     # Variable number of channels based on number of remote neighbors
+        #     self.sizes_expected_from_others = [
+        #         torch.floor(shard.unique_src_nodes.size(0) * compression_ratio) 
+        #                 for shard in self.graph_shards]
 
         self.in_degrees_cache: Dict[Optional[str], Tensor] = {}
         self.out_degrees_cache: Dict[Optional[str], Tensor] = {}
@@ -365,10 +345,7 @@ class GraphShardManager:
                                              unique_src_nodes,
                                              self.input_nodes,
                                              self.seeds,
-                                             self.graph_shards[0].edge_type_names,
-                                             self.compressors,
-                                             self.decompressors,
-                                             self.channel_type)
+                                             self.graph_shards[0].edge_type_names)
 
         if delete_shard_data:
             del self.graph_shards
