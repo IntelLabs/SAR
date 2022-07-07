@@ -43,7 +43,6 @@ from ..common_tuples import ShardEdgesAndFeatures, AggregationData, TensorPlace,
 from ..comm import exchange_tensors,  rank, all_reduce
 from .sar_aggregation import sar_op
 from .full_partition_block import DistributedBlock
-from .deep_channels import Compressor
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())

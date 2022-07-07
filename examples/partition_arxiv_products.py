@@ -51,7 +51,7 @@ parser.add_argument(
 
 parser.add_argument(
     '--num-partitions',
-    default=2,
+    default=20,
     type=int,
     help='Number of graph partitions to generate')
 
@@ -85,6 +85,7 @@ def main():
         args.num_partitions,
         args.partition_out_path,
         num_hops=1,
+        part_method="random",
         reshuffle=True,
         balance_ntypes=train_mask,
         balance_edges=True)

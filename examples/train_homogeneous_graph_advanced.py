@@ -365,10 +365,9 @@ def main():
             full_graph_manager = full_graph_manager.get_full_partition_graph()
             comp_mod = CompressorDecompressorBase(
                     feature_dim=[features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels],
-                    compression_ratio=args.compression_ratio,
-                    n_kernel=args.n_kernel,
-                    indices_required_from_me=full_graph_manager.indices_required_from_me
-                ) #TODO: why -2 not -1?
+                    compressor_type="feature",
+                    n_kernel=args.n_kernel
+                )
             full_graph_manager._compression_decompression = comp_mod
 
         full_graph_manager = full_graph_manager.to(device)

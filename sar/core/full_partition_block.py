@@ -30,9 +30,6 @@ from torch.autograd import profiler
 from sar.comm import exchange_tensors
 from sar.config import Config
 
-from sar.core.deep_channels import Compressor
-
-
 from ..comm import all_to_all, world_size, rank, all_reduce
 
 logger = logging.getLogger(__name__)
@@ -47,76 +44,50 @@ class CompressorDecompressorBase(nn.Module):
 
     def __init__(
         self,
-        feature_dim: List[int], compression_ratio: float,
-        n_kernel: int,
-        indices_required_from_me: List[int]):
+        feature_dim: List[int],
+        compressor_type: str,
+        n_kernel: int):
         super().__init__()
         self.feature_dim = feature_dim
-        if compression_ratio is None:
-            if n_kernel is None:
-                self.compressors = nn.Identity()
-                self.decompressors = nn.Identity()
-                self.channel_type = "direct"
+        self.compressor_type = compressor_type
+        self.compressors = nn.ModuleDict()
+        self.decompressors = nn.ModuleDict()
+        self.channel_type = "fixed"
+        for i, f in enumerate(feature_dim):
+            if compressor_type == "node":
+                #TODO: Implement Graph pooling based compression
+                self.compressors[f"layer_{i}"] = nn.Identity()
+                self.decompressors[f"layer_{i}"] = nn.Identity()
             else:
-                self.compressors = nn.ModuleDict()
-                self.decompressors = nn.ModuleDict()
-                self.attn = nn.ModuleDict()
-                self.channel_type = "fixed"
-                for i, f in enumerate(feature_dim):
-                    self.compressors[f"layer_{i}"] = Compressor(
-                            feature_dim=f, 
-                            n_kernel=n_kernel
-                        )
-                    # self.attn[f"layer_{i}"] = nn.Sequential(
-                    #     nn.Linear(self.feature_dim[i], self.feature_dim[i]),
-                    #     nn.ReLU(),
-                    #     nn.Linear(self.feature_dim[i], self.feature_dim[i])
-                    #     )
-        else:
-            self.compressors = nn.ModuleDict()
-            self.decompressors = nn.ModuleDict()
-            
-            self.channel_type = "client"
-            for i, f in enumerate(feature_dim):
-                self.compressors = nn.ModuleList([
-                    Compressor(
-                        feature_dim=f, 
-                        n_kernel=torch.floor(compression_ratio * len(src_indices))) 
-                    for src_indices in indices_required_from_me])
+                self.compressors[f"layer_{i}"] = nn.Sequential(
+                    nn.Linear(f, 256),
+                    nn.ReLU(),
+                    nn.Linear(256, n_kernel)
+                )
+                self.decompressors[f"layer_{i}"] = nn.Sequential(
+                    nn.Linear(n_kernel, 256),
+                    nn.ReLU(),
+                    nn.Linear(256, f)
+                )
                 
 
     def compress(self, tensors_l: List[Tensor]):
         '''
         Take a list of tensors and return a list of compressed tensors
         '''
-        if self.channel_type == "client":
-            # Client specific compression
-            tensors_l = [self.compressors[f"layer_{Config.current_layer_index}"][i](val) if i != rank() else val 
-                                for i, val in enumerate(tensors_l)]
-        elif self.channel_type == "fixed":
             # Send data to each client using same compression module
-            logger.debug(f"index: {Config.current_layer_index}, tensor_sz: {tensors_l[0].shape}")
-            tensors_l = [self.compressors[f"layer_{Config.current_layer_index}"](val) if i != rank() else val 
-                                for i, val in enumerate(tensors_l)]
+        logger.debug(f"index: {Config.current_layer_index}, tensor_sz: {tensors_l[0].shape}")
+        tensors_l = [self.compressors[f"layer_{Config.current_layer_index}"](val)
+                            if i != rank() else val for i, val in enumerate(tensors_l)]
         return tensors_l
 
-    def decompress(self, n_tgt_nodes: List[Tensor], channel_feat: List[Tensor]):
+    def decompress(self, channel_feat: List[Tensor]):
         '''
         Take a list of compressed tensors and return a list of decompressed tensors
         '''
-        decompressed_tensors = []
-        for i in range(len(n_tgt_nodes)):
-            if i == rank():
-                output = channel_feat[i]
-            else:
-                output = channel_feat[i].mean(dim=0, keepdim=True).repeat(n_tgt_nodes[i], 1)
-            # attn_mod = self.attn[f"layer_{Config.current_layer_index}"]
-            # dst_feat = attn_mod(dst_nodes_feat[i])
-            # channel_feat = attn_mod(channel_feat[i])
-            # attn_w = dst_feat.unsqueeze(1) * channel_feat.unsqueeze(0)
-            # attn_w = 
-            # attn_w = attn_w.view(dst_nodes_feat[i].size(0), channel_feat[i].size(0))
-            decompressed_tensors.append(output)
+        decompressed_tensors = [self.decompressors[f"layer_{Config.current_layer_index}"](c) 
+                                    if i != rank() else c for i, c in enumerate(channel_feat)]
+
         return decompressed_tensors
 
 
@@ -145,11 +116,19 @@ class ProxyDataView(MutableMapping):
             logger.debug(f'compression decompression: {rank()}')
             compressed_send_tensors = self.dist_block.compression_decompression.compress(
                 [value[ind] for ind in self.indices_required_from_me])
+            # Local received features have different shapes
+            # Replace with dummy tensor to make sure all tensors have same shape
+            dummy_tensor = torch.zeros_like(compressed_send_tensors[0]) if rank() != 0 \
+                else torch.zeros_like(compressed_send_tensors[1])
+            compressed_send_tensors = [v if i != rank() else dummy_tensor 
+                                        for i, v in enumerate(compressed_send_tensors)]
+        
             compressed_recv_tensors = simple_exchange_op(*compressed_send_tensors)
+            compressed_recv_tensors = [v if i != rank() else
+                            value[self.indices_required_from_me[i]] 
+                            for i, v in enumerate(compressed_recv_tensors)]
             recv_tensors = self.dist_block.compression_decompression.decompress(
-                self.sizes_expected_from_others,
                 list(compressed_recv_tensors))
-
             exchange_result = torch.cat(recv_tensors, dim=-2)
 
         logger.debug(f'exchange_result {exchange_result.size()}')
