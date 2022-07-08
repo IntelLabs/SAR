@@ -11,7 +11,7 @@ EXP = "lc"
 for i in range(N_CLIENTS):
     cmd_lc += f"python3 train_homogeneous_graph_advanced.py --partitioning-json-file ../partition_data/ogbn-arxiv.json \
         --log_dir {LOG_DIR_LC} --train-mode one_shot_aggregation --ip-file ip_file.txt --fed_agg_round {ROUND} --lr 1e-3 \
-            --train-iters 500 --n_kernel 16 --rank {i} --world-size {N_CLIENTS} --backend ccl &\n"
+            --train-iters 500 --n_kernel 256 --rank {i} --world-size {N_CLIENTS} --backend ccl &\n"
     cmd_nc += f"python3 fed_train_homogeneous_basic.py --partitioning-json-file ../partition_data/ogbn-arxiv.json \
         --log_dir {LOG_DIR_NC} --disable_cut_edges --ip-file ip_file.txt --fed_agg_round {ROUND} --lr 1e-3 \
             --train-iters 500 --n_kernel 16 --rank {i} --world-size {N_CLIENTS} --backend ccl &\n"

@@ -21,6 +21,7 @@
 from typing import List, Dict, Optional, Tuple, Union
 import logging
 from collections.abc import MutableMapping
+from numpy import append
 import torch
 import torch.nn as nn
 import dgl  # type: ignore
@@ -91,18 +92,51 @@ class CompressorDecompressorBase(nn.Module):
         return decompressed_tensors
 
 
+class SVD_Compressor(nn.Module):
+    def __init__(self, n_kernel):
+        self.n_kernel = n_kernel
+    
+    def compress(self, tensors_l: List[Tensor]):
+        output_U = []
+        output_S = []
+        output_Vh = []
+        for i, tensor in enumerate(tensors_l):
+            if i == rank():
+                output_U.append(U)
+                output_S.append(S)
+                output_Vh.append(Vh)
+                continue
+            U, S, Vh = torch.linalg.svd(tensor, full_matrices=False)
+            output_U.append(U[:, :self.n_kernel])
+            output_S.append(S[:self.n_kernel, :self.n_kernel])
+            output_Vh.append(Vh[:self.n_kernel, :])
+        return output_U, output_S, output_Vh
+    
+    def decompress(channel_feat: List[Tensor]):
+        output = []
+        for i, tensor in enumerate(channel_feat):
+            if i == rank():
+                output.append(tensor)
+                continue
+            U, S, Vh = tensor
+            output.append(U @ torch.diag(S) @ Vh)
+    
+
+
 class ProxyDataView(MutableMapping):
     """A distributed dictionary"""
 
     def __init__(self, dist_block: "DistributedBlock",
                  tensor_sz: int, base_dict: MutableMapping,
                  indices_required_from_me: List[Tensor],
-                 sizes_expected_from_others:  List[int]):
+                 sizes_expected_from_others:  List[int],
+                 compression_type: str):
         self.base_dict = base_dict
         self.tensor_sz = tensor_sz
         self.indices_required_from_me = indices_required_from_me
         self.sizes_expected_from_others = sizes_expected_from_others
         self.dist_block = dist_block
+        self.compression_type = compression_type
 
     def set_base_dict(self, new_base_dict: MutableMapping):
         self.base_dict = new_base_dict
