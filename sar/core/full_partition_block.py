@@ -61,14 +61,15 @@ class CompressorDecompressorBase(nn.Module):
                 self.decompressors[f"layer_{i}"] = nn.Identity()
             else:
                 self.compressors[f"layer_{i}"] = nn.Sequential(
-                    nn.Linear(f, 256),
+                    nn.Linear(f, f),
                     nn.ReLU(),
-                    nn.Linear(256, n_kernel)
+                    nn.Linear(f, n_kernel),
+                    nn.ReLU()
                 )
                 self.decompressors[f"layer_{i}"] = nn.Sequential(
-                    nn.Linear(n_kernel, 256),
+                    nn.Linear(n_kernel, f),
                     nn.ReLU(),
-                    nn.Linear(256, f)
+                    nn.Linear(f, f)
                 )
                 
 
@@ -79,15 +80,19 @@ class CompressorDecompressorBase(nn.Module):
             # Send data to each client using same compression module
         logger.debug(f"index: {Config.current_layer_index}, tensor_sz: {tensors_l[0].shape}")
         tensors_l = [self.compressors[f"layer_{Config.current_layer_index}"](val)
-                            if i != rank() else val for i, val in enumerate(tensors_l)]
+                            if Config.current_layer_index < Config.total_layers - 1 
+                                else val for val in tensors_l]
         return tensors_l
 
     def decompress(self, channel_feat: List[Tensor]):
         '''
         Take a list of compressed tensors and return a list of decompressed tensors
         '''
-        decompressed_tensors = [self.decompressors[f"layer_{Config.current_layer_index}"](c) 
-                                    if i != rank() else c for i, c in enumerate(channel_feat)]
+        if Config.current_layer_index == Config.total_layers - 1:
+            print(f"Layer: {Config.current_layer_index} / {Config.total_layers - 1}")
+        decompressed_tensors = [self.decompressors[f"layer_{Config.current_layer_index}"](c)
+                                    if Config.current_layer_index < Config.total_layers - 1 
+                                        else c for c in channel_feat]
 
         return decompressed_tensors
 
@@ -129,14 +134,12 @@ class ProxyDataView(MutableMapping):
     def __init__(self, dist_block: "DistributedBlock",
                  tensor_sz: int, base_dict: MutableMapping,
                  indices_required_from_me: List[Tensor],
-                 sizes_expected_from_others:  List[int],
-                 compression_type: str):
+                 sizes_expected_from_others:  List[int]):
         self.base_dict = base_dict
         self.tensor_sz = tensor_sz
         self.indices_required_from_me = indices_required_from_me
         self.sizes_expected_from_others = sizes_expected_from_others
         self.dist_block = dist_block
-        self.compression_type = compression_type
 
     def set_base_dict(self, new_base_dict: MutableMapping):
         self.base_dict = new_base_dict
@@ -150,19 +153,10 @@ class ProxyDataView(MutableMapping):
             logger.debug(f'compression decompression: {rank()}')
             compressed_send_tensors = self.dist_block.compression_decompression.compress(
                 [value[ind] for ind in self.indices_required_from_me])
-            # Local received features have different shapes
-            # Replace with dummy tensor to make sure all tensors have same shape
-            dummy_tensor = torch.zeros_like(compressed_send_tensors[0]) if rank() != 0 \
-                else torch.zeros_like(compressed_send_tensors[1])
-            compressed_send_tensors = [v if i != rank() else dummy_tensor 
-                                        for i, v in enumerate(compressed_send_tensors)]
-        
             compressed_recv_tensors = simple_exchange_op(*compressed_send_tensors)
-            compressed_recv_tensors = [v if i != rank() else
-                            value[self.indices_required_from_me[i]] 
-                            for i, v in enumerate(compressed_recv_tensors)]
             recv_tensors = self.dist_block.compression_decompression.decompress(
                 list(compressed_recv_tensors))
+            recv_tensors[rank()] = value[self.indices_required_from_me[rank()]]
             exchange_result = torch.cat(recv_tensors, dim=-2)
 
         logger.debug(f'exchange_result {exchange_result.size()}')

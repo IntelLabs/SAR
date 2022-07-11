@@ -134,7 +134,7 @@ class GNNModel(nn.Module):
         self.convs = nn.ModuleList()
         for idx in range(len(dims) - 1):
             if gnn_layer == 'gat':
-                # use 2 aattention heads
+                # use 2 attention heads
                 layer = dgl.nn.GATConv(dims[idx], dims[idx+1], 2)  # pylint: disable=no-member
             elif gnn_layer == 'gcn':
                 layer = dgl.nn.GraphConv(dims[idx], dims[idx+1])  # pylint: disable=no-member
@@ -287,6 +287,7 @@ def main():
             args.world_size = int(os.environ["WORLD_SIZE"])
 
     use_gpu = torch.cuda.is_available() and not args.cpu_run
+    Config.total_layers = args.n_layers
     # Create log directory
     writer = SummaryWriter(f"{args.log_dir}/ogbn-arxiv/lr={args.lr}/n_clients={args.world_size}/rank={args.rank}")
 

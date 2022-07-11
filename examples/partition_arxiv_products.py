@@ -51,7 +51,7 @@ parser.add_argument(
 
 parser.add_argument(
     '--num-partitions',
-    default=20,
+    default=10,
     type=int,
     help='Number of graph partitions to generate')
 
