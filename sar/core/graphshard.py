@@ -111,8 +111,7 @@ class GraphShard:
         if self._graph_reverse is None:
             edges_src, edges_tgt = self.graph.all_edges()
             self._graph_reverse = dgl.create_block((edges_tgt, edges_src),
-                                                   num_src_nodes=self.unique_tgt_nodes.size(
-                                                       0),
+                                                   num_src_nodes=self.unique_tgt_nodes.size(0),
                                                    num_dst_nodes=self.unique_src_nodes.size(0))
             self._graph_reverse.edata.update(self.graph.edata)
         return self._graph_reverse
@@ -187,13 +186,6 @@ class GraphShardManager:
     :type local_src_seeds: torch.Tensor
     :param local_tgt_seeds: The node indices of the output nodes relative to the starting node index of the local partition
     :type local_tgt_seeds: torch.Tensor
-    :param feature_dim: The node feature size needed to create the compressor and decompressor
-    :type feature_dim: int
-    :param compression_ratio: Ratio of number of src_nodes in the local partition and number of channels to remote partition
-    :type compression_ratio: float
-    :param n_kernel: If compression_ratio is None, n_kernel will be used as the number of channels for all the clients and
-    the same compressor will be used for every client
-    :type n_kernel: int
 
     """
 
@@ -229,20 +221,6 @@ class GraphShardManager:
         self.indices_required_from_me = self.update_boundary_nodes_indices()
         self.sizes_expected_from_others = [
                     shard.unique_src_nodes.size(0) for shard in self.graph_shards]
-        # if compression_ratio is None:
-        #     if n_kernel is None:
-        #         # Communication using cut-edges instead of learnable channels
-        #         self.sizes_expected_from_others = [
-        #             shard.unique_src_nodes.size(0) for shard in self.graph_shards]
-        #     else:
-        #         # Create fixed number of channels across all clients 
-        #         self.sizes_expected_from_others = [
-        #             n_kernel for _ in self.graph_shards]
-        # else:
-        #     # Variable number of channels based on number of remote neighbors
-        #     self.sizes_expected_from_others = [
-        #         torch.floor(shard.unique_src_nodes.size(0) * compression_ratio) 
-        #                 for shard in self.graph_shards]
 
         self.in_degrees_cache: Dict[Optional[str], Tensor] = {}
         self.out_degrees_cache: Dict[Optional[str], Tensor] = {}

@@ -54,3 +54,5 @@ class Config(object):
     pipeline_depth: int = 1
     current_layer_index: int = 0
     total_layers: int = None
+    train_iter: int = 0
+    total_train_iter: int = 0

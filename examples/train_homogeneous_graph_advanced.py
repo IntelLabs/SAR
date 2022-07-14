@@ -31,7 +31,8 @@ from torch.utils.tensorboard import SummaryWriter
 import dgl  # type: ignore
 
 import sar
-from sar.core.full_partition_block import CompressorDecompressorBase
+from sar.core.compressor import \
+    FeatureCompressorDecompressor, NodeCompressorDecompressor
 from sar.config import Config
 
 
@@ -105,8 +106,17 @@ parser.add_argument('--n-layers', default=3, type=int,
 parser.add_argument('--layer-dim', default=256, type=int,
                     help='Dimension of GNN hidden layer')
 
-parser.add_argument('--compression_ratio', default=None, type=float, 
-                    help="Compression ratio for client-wise compression channel-set")
+parser.add_argument('--compression_ratio_b', default=None, type=float, 
+                    help="Initial Compression ratio for client-wise compression channel-set")
+
+parser.add_argument('--compression_ratio_a', default=None, type=float, 
+                    help="Compression ratio slope for client-wise compression channel-set")
+
+parser.add_argument('--compression_step', default=None, type=int, 
+                    help="Number of training iteration after which compression ratio changes")
+
+parser.add_argument('--compression_type', default=None, type=str, 
+                    help="Compression type")
 
 parser.add_argument('--n_kernel', default=None, type=int,
                     help='Number of channels in the fixed compression channel-set')
@@ -288,6 +298,8 @@ def main():
 
     use_gpu = torch.cuda.is_available() and not args.cpu_run
     Config.total_layers = args.n_layers
+    Config.total_train_iter = args.train_iters
+    Config.step = args.compression_step
     # Create log directory
     writer = SummaryWriter(f"{args.log_dir}/ogbn-arxiv/lr={args.lr}/n_clients={args.world_size}/rank={args.rank}")
 
@@ -364,11 +376,18 @@ def main():
         full_graph_manager = sar.construct_full_graph(partition_data)
         if args.train_mode == 'one_shot_aggregation':
             full_graph_manager = full_graph_manager.get_full_partition_graph()
-            comp_mod = CompressorDecompressorBase(
-                    feature_dim=[features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels],
-                    compressor_type="feature",
-                    n_kernel=args.n_kernel
-                )
+            if args.compression_type == "feature":
+                comp_mod = FeatureCompressorDecompressor(
+                        feature_dim=[features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels],
+                        comp_ratio= [float(args.compression_ratio_b)] * args.n_layers
+                    )
+            else:
+                comp_mod = NodeCompressorDecompressor(
+                        feature_dim=[features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels],
+                        comp_ratio_b=[float(args.compression_ratio_b)] * args.n_layers,
+                        comp_ratio_a=[float(args.compression_ratio_a)] * args.n_layers,
+                        step=args.compression_step
+                    )
             full_graph_manager._compression_decompression = comp_mod
 
         full_graph_manager = full_graph_manager.to(device)
@@ -409,6 +428,7 @@ def main():
     model_acc = 0
     for train_iter_idx in range(args.train_iters):
         t_1 = time.time()
+        Config.train_iter = train_iter_idx
         train_pass(gnn_model,
                    optimizer,
                    train_blocks,
