@@ -1,5 +1,5 @@
 N_CLIENTS = 10
-ROUND = 1
+ROUND = 10
 cmd_lc = []
 cmd_nc = []
 cmd_rc = []
@@ -7,13 +7,13 @@ cmd_vrc = []
 COMP_TYPE = "node"
 COMP_RATIO_A = "2"
 COMP_RATIO_B = "1024"
-STEP = 16
-TRAIN_ITER = 256
+STEP = 32
+TRAIN_ITER = 512
 
 LOG_DIR_LC = f"log/fixed_channel/{COMP_TYPE}/CR={COMP_RATIO_B}/K={ROUND}"
 LOG_DIR_NC = f"log/no_channel/K={ROUND}"
 LOG_DIR_RC = f"log/full_graph/K={ROUND}"
-LOG_DIR_VCR = f"log/varying_channel/{COMP_TYPE}/CR={TRAIN_ITER//STEP}"
+LOG_DIR_VCR = f"log/varying_channel/{COMP_TYPE}/CR={TRAIN_ITER//STEP}/K={ROUND}"
 EXP = "vcr"
 
 for i in range(N_CLIENTS):
