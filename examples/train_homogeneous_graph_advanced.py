@@ -157,7 +157,7 @@ class GNNModel(nn.Module):
                 raise ValueError(f'unknown gnn layer type {gnn_layer}')
             self.convs.append(layer)
 
-    def forward(self,  blocks: List[Union[sar.GraphShardManager, sar.DistributedBlock]],
+    def forward(self, blocks: List[Union[sar.GraphShardManager, sar.DistributedBlock]],
                 features: torch.Tensor):
         for idx, conv in enumerate(self.convs):
             Config.current_layer_index = idx
@@ -375,6 +375,8 @@ def main():
     else:  # No MFGs. The same full graph in every layer
         full_graph_manager = sar.construct_full_graph(partition_data)
         if args.train_mode == 'one_shot_aggregation':
+            indices_required_from_me = full_graph_manager.indices_required_from_me
+            tgt_node_range = full_graph_manager.tgt_node_range
             full_graph_manager = full_graph_manager.get_full_partition_graph()
             if args.compression_type == "feature":
                 comp_mod = FeatureCompressorDecompressor(
