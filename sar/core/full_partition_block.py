@@ -65,7 +65,7 @@ class ProxyDataView(MutableMapping):
             compressed_send_tensors = self.dist_block.compression_decompression.compress(
                 [value[ind] for ind in self.indices_required_from_me], 
                 Config.train_iter, Config.step, 
-                vcr_type="exp", scorer_type="learnable")
+                vcr_type="constant", scorer_type="learnable")
             if type(compressed_send_tensors) is tuple:
                 compressed_recv_tensors = []
                 for i in range(len(compressed_send_tensors)):

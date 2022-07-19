@@ -1,13 +1,13 @@
 N_CLIENTS = 10
-ROUND = 10
+ROUND = 1
 cmd_lc = []
 cmd_nc = []
 cmd_rc = []
 cmd_vrc = []
-COMP_TYPE = "node"
+COMP_TYPE = "subgraph"
 COMP_RATIO_A = "2"
 COMP_RATIO_B = "1024"
-STEP = 32
+STEP = 128
 TRAIN_ITER = 512
 
 LOG_DIR_LC = f"log/fixed_channel/{COMP_TYPE}/CR={COMP_RATIO_B}/K={ROUND}"

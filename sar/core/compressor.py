@@ -6,11 +6,11 @@ import dgl
 from collections.abc import MutableMapping
 from numpy import append
 import torch
+from torch import seed
 import torch.nn as nn
 from torch import Tensor
 from sar.comm import exchange_tensors, rank
 from sar.config import Config
-from sar.core.full_partition_block import DistributedBlock
 
 logger = logging.getLogger(__name__)
 
@@ -77,13 +77,21 @@ class FeatureCompressorDecompressor(CompressorDecompressorBase):
         return decompressed_tensors
 
 
+def compute_CR_exp(step, iter):
+        # Decrease CR from 2**p to 2**1
+        return 2**(ceil((Config.total_train_iter - iter)/step))
+    
+def compute_CR_linear(init_CR, slope, step, iter):
+    # Decrease CR using b - a*x
+    return init_CR - slope * (iter// step)
+
+
 class NodeCompressorDecompressor(CompressorDecompressorBase):
     def __init__(
         self, 
         feature_dim: List[int], 
         comp_ratio_b: List[float],
-        comp_ratio_a: List[float],
-        step: int):
+        comp_ratio_a: List[float]):
         """
         Compresses and decompresses along node dimension by selecting
         a fraction of nodes at the compressor and replacing them by 0
@@ -95,20 +103,11 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
         self.scorer = nn.ModuleDict()
         self.comp_ratio_b = comp_ratio_b
         self.comp_ratio_a = comp_ratio_a
-        self.step = step
         for i, f in enumerate(feature_dim):
             self.scorer[f"layer_{i}"] = nn.Sequential(
                 nn.Linear(f, 1),
                 nn.Sigmoid()
             )
-    
-    def _compute_CR_exp(self, step, iter):
-        # Decrease CR from 2**p to 2**1
-        return 2**(ceil((Config.total_train_iter - iter)/step))
-    
-    def _compute_CR_linear(self, init_CR, slope, step, iter):
-        # Decrease CR using b - a*x
-        return init_CR - slope * (iter// step)
             
     def compress(
         self, 
@@ -135,9 +134,9 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
         compressed_tensors_l = []
         sel_indices = []
         if vcr_type == "exp":
-            comp_ratio = self._compute_CR_exp(step, iter)
+            comp_ratio = compute_CR_exp(step, iter)
         elif vcr_type == "linear":
-            comp_ratio = self._compute_CR_linear(
+            comp_ratio = compute_CR_linear(
                                 self.comp_ratio_b[Config.current_layer_index],
                                 self.comp_ratio_a[Config.current_layer_index],
                                 step, iter)
@@ -189,15 +188,18 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
     def __init__(
         self,
         feature_dim: List[int],
-        full_local_graph: DistributedBlock,
+        full_local_graph,
         indices_required_from_me: List[Tensor],
-        tgt_node_range: Tuple[int, int]
+        tgt_node_range: Tuple[int, int],
+        comp_ratio_b: List[float],
+        comp_ratio_a: List[float]
         ):
         super().__init__()
 
         self.full_local_graph = full_local_graph
-        self.indices_required_from_me = indices_required_from_me
         self.tgt_node_range = tgt_node_range
+        self.comp_ratio_b = comp_ratio_b
+        self.comp_ratio_a = comp_ratio_a
 
         # Create learnable modules
         self.pack = nn.ModuleDict()
@@ -205,62 +207,69 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         self.unpack = nn.ModuleDict()
 
         for i, f in enumerate(feature_dim):
-            self.pack[f"layer_{i}"] = nn.Sequential(
-                dgl.nn.SAGEConv(f, f, aggregator_type='mean'),
-                nn.ReLU(),
-                dgl.nn.SAGEConv(f, f, aggregator_type='mean')
+            self.pack[f"layer_{i}"] = nn.ModuleList([
+                dgl.nn.SAGEConv(f, f, aggregator_type='mean')]
             )
             self.scorer[f"layer_{i}"] = nn.Sequential(
                 nn.Linear(f, 1),
                 nn.Sigmoid()
             )
-            self.unpack[f"layer_{i}"] = nn.Sequential(
-                dgl.nn.SAGEConv(f, f, aggregator_type='mean'),
-                nn.ReLU(),
-                dgl.nn.SAGEConv(f, f, aggregator_type='mean')
+            self.unpack[f"layer_{i}"] = nn.ModuleList([
+                dgl.nn.SAGEConv(f, f, aggregator_type='mean')]
             )
-        
         # Create induced subgraphs for source nodes
         self.induced_boundary_graphs = []
+        self.edges_src_nodes = []
+        self.edges_tgt_nodes = []
         self.remote_boundary_graphs = []
         for i, local_src_nodes in enumerate(indices_required_from_me):
-            local_bg = self._construct_boundary_subgraph_local(local_src_nodes)
-            remote_bg = self._construct_boundary_subgraph_remote(full_local_graph.unique_src_nodes[i])
-            self.induced_boundary_graphs.append(local_bg)
-            self.remote_boundary_graphs.append(remote_bg)
+            boundary_induced_subgraph, edges_src_nodes, edges_tgt_nodes =\
+                 self._construct_boundary_subgraph(local_src_nodes)
+            self.induced_boundary_graphs.append(boundary_induced_subgraph)
+            self.edges_src_nodes.append(edges_src_nodes)
+            self.edges_tgt_nodes.append(edges_tgt_nodes)
             
-    def _construct_boundary_subgraph_local(self, seed_nodes: List[Tensor]):
-        local_src_range = self.full_local_graph.src_ranges[rank()]
-        # Select edges where target nodes are the local boundary nodes (seed nodes)
-        # and source nodes are from local partition
-        induced_edge_locs_tgt = torch.isin(self.full_local_graph.all_edges()[1], seed_nodes)
-        induced_edge_locs_src = torch.isin(self.full_local_graph.all_edges()[0], 
-                                    torch.range(local_src_range[0], local_src_range[1]))
-        induced_edge_locs = induced_edge_locs_tgt and induced_edge_locs_src
-        # Convert target and source nodes to global indices
-        global_tgt_nodes = self.full_local_graph.all_edges()[1][induced_edge_locs] + self.tgt_node_range[0]
+    def _construct_boundary_subgraph(self, seed_nodes: List[Tensor]):
+        # Select edges where source and target nodes are the local boundary nodes (seed nodes)
+        # First convert node id's to global id's
         graph_to_global = torch.cat(self.full_local_graph.unique_src_nodes)
-        global_src_nodes = graph_to_global[self.full_local_graph.all_edges()[0][induced_edge_locs]]
-        induced_graph = dgl.graph((global_src_nodes, global_tgt_nodes))
-        return induced_graph
-    
-    def _construct_boundary_subgraph_remote(self, seed_nodes: List[Tensor]):
-        # Select edges where target nodes are the local nodes
-        # and source nodes are the remote nodes (seed nodes) for a partition
-        induced_edge_locs = torch.isin(self.full_local_graph.all_edges()[0], seed_nodes)
-        # Convert target and source nodes to global indices
-        global_tgt_nodes = self.full_local_graph.all_edges()[1][induced_edge_locs] + self.tgt_node_range[0]
-        graph_to_global = torch.cat(self.full_local_graph.unique_src_nodes)
-        global_src_nodes = graph_to_global[self.full_local_graph.all_edges()[0][induced_edge_locs]]
-        induced_graph = dgl.graph((global_src_nodes, global_tgt_nodes))
-        return induced_graph
+        global_tgt_nodes = seed_nodes + self.tgt_node_range[0]
+        global_src_nodes = global_tgt_nodes # src and tgt are the same
+        global_tgt_edges = self.full_local_graph.all_edges()[1] + self.tgt_node_range[0]
+        global_src_edges = graph_to_global[self.full_local_graph.all_edges()[0]]
+
+        # Find edges where source and target nodes are boundary nodes
+        induced_edge_locs_tgt = torch.isin(global_tgt_edges, global_tgt_nodes)
+        induced_edge_locs_src = torch.isin(global_src_edges, global_src_nodes)
+        induced_edge_locs = torch.logical_and(induced_edge_locs_tgt, induced_edge_locs_src)
+        assert induced_edge_locs.size(0) > 0, \
+            "There should be at least one edge in the induced graph"
+        
+        # Convert to graph id
+        src_nodes = global_src_edges[induced_edge_locs]
+        tgt_nodes = global_tgt_edges[induced_edge_locs]
+        unique_src_nodes, unique_src_nodes_inverse = \
+            torch.unique(src_nodes, sorted=True, return_inverse=True)
+        unique_tgt_nodes, unique_tgt_nodes_inverse = \
+            torch.unique(tgt_nodes, sorted=True, return_inverse=True)
+        assert torch.all(unique_src_nodes == unique_tgt_nodes), \
+            "Source and Target nodes must be the same"
+        edges_src_nodes = torch.arange(unique_src_nodes.size(0))[unique_src_nodes_inverse]
+        edges_tgt_nodes = torch.arange(unique_tgt_nodes.size(0))[unique_tgt_nodes_inverse]
+
+        induced_graph = dgl.graph(
+            (edges_src_nodes, edges_tgt_nodes),
+            num_nodes=len(seed_nodes),
+            device=self.full_local_graph.device)
+        return induced_graph, edges_src_nodes, edges_tgt_nodes
 
     def compress(
         self, 
         tensors_l: List[Tensor],
         iter: int = 0,
         step: int = 32,
-        vcr_type: str = "exp"):
+        vcr_type: str = "exp",
+        scorer_type: str = "learnable"):
         """
         Take a list of tensors and return a list of compressed tensors
 
@@ -279,12 +288,14 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         compressed_tensors_l = []
         sel_indices = []
         if vcr_type == "exp":
-            comp_ratio = self._compute_CR_exp(step, iter)
+            comp_ratio = compute_CR_exp(step, iter)
         elif vcr_type == "linear":
-            comp_ratio = self._compute_CR_linear(
+            comp_ratio = compute_CR_linear(
                                 self.comp_ratio_b[Config.current_layer_index],
                                 self.comp_ratio_a[Config.current_layer_index],
                                 step, iter)
+        elif vcr_type == "constant":
+            comp_ratio = Config.total_train_iter // step
         else:
             raise NotImplementedError(
                 "vcr_type should be either exp or linear")
@@ -292,7 +303,11 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         comp_ratio = max(1, comp_ratio)
         for i, val in enumerate(tensors_l):
             g = self.induced_boundary_graphs[i]
-            val = self.pack[f"layer_{Config.current_layer_index}"](g, val)
+            net = self.pack[f"layer_{Config.current_layer_index}"]
+            for idx, conv in enumerate(net):
+                val = conv(g, val)
+                if idx < len(net) - 1:
+                    val = nn.ReLU()(val)
             score = self.scorer[f"layer_{Config.current_layer_index}"](val)
             k = val.shape[0] // comp_ratio
             k = max(1, k) # Send at least 1 node if CR is too high.
@@ -300,7 +315,8 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
             idx = idx.squeeze(-1)
             compressed_tensors_l.append(val[idx, :])
             sel_indices.append(idx)
-        return compressed_tensors_l, sel_indices
+        return compressed_tensors_l, sel_indices, \
+            self.edges_src_nodes, self.edges_tgt_nodes
     
     def decompress(
         self, 
@@ -311,9 +327,9 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
 
         channel_feat = args[0]
         sel_indices = args[1]
-        sizes_expected_from_others = args[2]
-        induced_subgraphs = args[3]
-
+        edges_src_nodes = args[2]
+        edges_tgt_nodes = args[3]
+        sizes_expected_from_others = args[4]
         decompressed_tensors_l = []
 
         for i in range(len(sizes_expected_from_others)):
@@ -321,8 +337,12 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
                 sizes_expected_from_others[i], 
                 channel_feat[i].shape[1])
             new_val[sel_indices[i], :] = channel_feat[i]
-            new_val = self.unpack[f"layer_{Config.current_layer_index}"](
-                induced_subgraphs[i], new_val)
+            induced_graph = dgl.graph((edges_src_nodes[i], edges_tgt_nodes[i]))
+            net = self.unpack[f"layer_{Config.current_layer_index}"]
+            for idx, conv in enumerate(net):
+                new_val = conv(induced_graph, new_val)
+                if idx < len(net) - 1:
+                    new_val = nn.ReLU()(new_val)
             decompressed_tensors_l.append(new_val)
 
         return decompressed_tensors_l

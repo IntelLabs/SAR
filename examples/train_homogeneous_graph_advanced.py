@@ -32,7 +32,7 @@ import dgl  # type: ignore
 
 import sar
 from sar.core.compressor import \
-    FeatureCompressorDecompressor, NodeCompressorDecompressor
+    FeatureCompressorDecompressor, NodeCompressorDecompressor, SubgraphCompressorDecompressor
 from sar.config import Config
 
 
@@ -378,18 +378,31 @@ def main():
             indices_required_from_me = full_graph_manager.indices_required_from_me
             tgt_node_range = full_graph_manager.tgt_node_range
             full_graph_manager = full_graph_manager.get_full_partition_graph()
+            feature_dim = [features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels]
             if args.compression_type == "feature":
                 comp_mod = FeatureCompressorDecompressor(
-                        feature_dim=[features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels],
+                        feature_dim=feature_dim,
                         comp_ratio= [float(args.compression_ratio_b)] * args.n_layers
                     )
-            else:
+            elif args.compression_type == "node":
                 comp_mod = NodeCompressorDecompressor(
-                        feature_dim=[features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels],
+                        feature_dim=feature_dim,
                         comp_ratio_b=[float(args.compression_ratio_b)] * args.n_layers,
                         comp_ratio_a=[float(args.compression_ratio_a)] * args.n_layers,
                         step=args.compression_step
                     )
+            elif args.compression_type == "subgraph":
+                comp_mod = SubgraphCompressorDecompressor(
+                        feature_dim=feature_dim,
+                        full_local_graph=full_graph_manager,
+                        indices_required_from_me=indices_required_from_me,
+                        tgt_node_range=tgt_node_range,
+                        comp_ratio_b=[float(args.compression_ratio_b)] * args.n_layers,
+                        comp_ratio_a=[float(args.compression_ratio_a)] * args.n_layers
+                )
+            else:
+                raise NotImplementedError("Undefined compression_type." 
+                                            "Must be one of feature/node/subgraph")
             full_graph_manager._compression_decompression = comp_mod
 
         full_graph_manager = full_graph_manager.to(device)
