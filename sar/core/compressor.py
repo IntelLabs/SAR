@@ -229,7 +229,9 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
             self.edges_src_nodes.append(edges_src_nodes)
             self.edges_tgt_nodes.append(edges_tgt_nodes)
             
-    def _construct_boundary_subgraph(self, seed_nodes: List[Tensor]):
+    def _construct_boundary_subgraph(self, seed_nodes: Tensor):
+        assert torch.all(seed_nodes == torch.sort(seed_nodes)[0]), \
+            "seed_nodes should be sorted"
         # Select edges where source and target nodes are the local boundary nodes (seed nodes)
         # First convert node id's to global id's
         graph_to_global = torch.cat(self.full_local_graph.unique_src_nodes)
