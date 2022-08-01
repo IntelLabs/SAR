@@ -2,6 +2,7 @@ import enum
 from math import ceil, floor, log2
 from typing import List, Tuple
 import logging
+from xmlrpc.client import boolean
 import dgl
 from collections.abc import MutableMapping
 from numpy import append
@@ -11,6 +12,7 @@ import torch.nn as nn
 from torch import Tensor
 from sar.comm import exchange_tensors, rank
 from sar.config import Config
+from sar.core.custom_models import SageConvExt
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +142,8 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
                                 self.comp_ratio_b[Config.current_layer_index],
                                 self.comp_ratio_a[Config.current_layer_index],
                                 step, iter)
+        elif vcr_type == "constant":
+                comp_ratio = Config.total_train_iter // step
         else:
             raise NotImplementedError(
                 "vcr_type should be either exp or linear")
@@ -185,37 +189,57 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
 
 
 class SubgraphCompressorDecompressor(CompressorDecompressorBase):
+    """
+    A class to perform subgraph-based compression decompression mechanism.
+    While sending a set of node features to remote clients this class sends a 
+    representation of the subgraph induced by those nodes. This representation
+    is better both in terms of privacy (since it's not a node-specific representation) 
+    and communication overhead (since it's a compressed representation). Upon receiving,
+    the remote client diffuses these representation using the induced subgraph structure.
+
+    :param feature_dim: List of integers representing the feature dimensions at each GNN layer.
+    :type feature_dim: List[int]
+    :param full_local_graph: A graph representing all the edges incoming to this partition.
+    :type full_local_graph: DistributedBlock
+    :param indices_required_from_me: The local node indices required by every other partition to \
+        carry out one-hop aggregation
+    :type indices_required_from_me: List[Tensor]
+    :param tgt_node_range: Node ranges for target clients.
+    :type tgt_node_range: Tuple[int, int]
+    :param comp_ratio: Fixed compression ratio. n_nodes/comp_ratio nodes will be sent.
+    :type comp_ratio: int
+    """
+
     def __init__(
         self,
         feature_dim: List[int],
         full_local_graph,
         indices_required_from_me: List[Tensor],
         tgt_node_range: Tuple[int, int],
-        comp_ratio_b: List[float],
-        comp_ratio_a: List[float]
-        ):
+        comp_ratio: int
+    ):
         super().__init__()
-
         self.full_local_graph = full_local_graph
         self.tgt_node_range = tgt_node_range
-        self.comp_ratio_b = comp_ratio_b
-        self.comp_ratio_a = comp_ratio_a
+        self.comp_ratio = comp_ratio
 
         # Create learnable modules
-        self.pack = nn.ModuleDict()
-        self.scorer = nn.ModuleDict()
-        self.unpack = nn.ModuleDict()
+        self.pack = nn.ModuleDict()     # GCN module to aggregate information
+        self.scorer = nn.ModuleDict()   # Ranking module
+        self.unpack = nn.ModuleDict()   # GCN module to diffuse information
+        self.normalize_remote = \
+            nn.ModuleDict()             # Projects remote neighbors to a common distribution
+        self.normalize_local = \
+            nn.ModuleDict()             # Projects local neighbors to common distribribution
 
         for i, f in enumerate(feature_dim):
-            self.pack[f"layer_{i}"] = nn.ModuleList([
+            layer = f"layer_{i}"
+            self.pack[layer] = nn.ModuleList([
                 dgl.nn.SAGEConv(f, f, aggregator_type='mean')]
             )
-            self.scorer[f"layer_{i}"] = nn.Sequential(
-                nn.Linear(f, 1),
-                nn.Sigmoid()
-            )
-            self.unpack[f"layer_{i}"] = nn.ModuleList([
-                dgl.nn.SAGEConv(f, f, aggregator_type='mean')]
+            self.scorer[layer] = nn.Linear(f, 1)
+            self.unpack[layer] = nn.ModuleList([
+                SageConvExt(f, f, update_func="diffuse")]
             )
         # Create induced subgraphs for source nodes
         self.induced_boundary_graphs = []
@@ -263,15 +287,12 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
             (edges_src_nodes, edges_tgt_nodes),
             num_nodes=len(seed_nodes),
             device=self.full_local_graph.device)
-        return induced_graph, edges_src_nodes, edges_tgt_nodes
+        
+        return dgl.add_self_loop(induced_graph), edges_src_nodes, edges_tgt_nodes
 
     def compress(
         self, 
-        tensors_l: List[Tensor],
-        iter: int = 0,
-        step: int = 32,
-        vcr_type: str = "exp",
-        scorer_type: str = "learnable"):
+        tensors_l: List[Tensor]):
         """
         Take a list of tensors and return a list of compressed tensors
 
@@ -289,27 +310,15 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
 
         compressed_tensors_l = []
         sel_indices = []
-        if vcr_type == "exp":
-            comp_ratio = compute_CR_exp(step, iter)
-        elif vcr_type == "linear":
-            comp_ratio = compute_CR_linear(
-                                self.comp_ratio_b[Config.current_layer_index],
-                                self.comp_ratio_a[Config.current_layer_index],
-                                step, iter)
-        elif vcr_type == "constant":
-            comp_ratio = Config.total_train_iter // step
-        else:
-            raise NotImplementedError(
-                "vcr_type should be either exp or linear")
-        
-        comp_ratio = max(1, comp_ratio)
+        comp_ratio = max(1, self.comp_ratio)
         for i, val in enumerate(tensors_l):
-            g = self.induced_boundary_graphs[i]
-            net = self.pack[f"layer_{Config.current_layer_index}"]
-            for idx, conv in enumerate(net):
-                val = conv(g, val)
-                if idx < len(net) - 1:
-                    val = nn.ReLU()(val)
+            if Config.current_layer_index == 0:
+                g = self.induced_boundary_graphs[i]
+                net = self.pack[f"layer_{Config.current_layer_index}"]
+                for j, conv in enumerate(net):
+                    val = conv(g, val)
+                    if j < len(net) - 1:
+                        val = nn.ReLU()(val)
             score = self.scorer[f"layer_{Config.current_layer_index}"](val)
             k = val.shape[0] // comp_ratio
             k = max(1, k) # Send at least 1 node if CR is too high.
@@ -342,10 +351,12 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
             induced_graph = dgl.graph((edges_src_nodes[i], edges_tgt_nodes[i]))
             net = self.unpack[f"layer_{Config.current_layer_index}"]
             for idx, conv in enumerate(net):
-                new_val = conv(induced_graph, new_val)
+                new_val = conv(induced_graph, new_val, sel_indices[i])
                 if idx < len(net) - 1:
                     new_val = nn.ReLU()(new_val)
             decompressed_tensors_l.append(new_val)
 
         return decompressed_tensors_l
+    
+
         

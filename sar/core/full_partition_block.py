@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+from cgitb import enable
 from typing import List, Dict, Optional, Tuple
 import logging
 from collections.abc import MutableMapping
@@ -63,9 +64,7 @@ class ProxyDataView(MutableMapping):
         with profiler.record_function("COMM_FETCH"):
             logger.debug(f'compression decompression: {rank()}')
             compressed_send_tensors = self.dist_block.compression_decompression.compress(
-                [value[ind] for ind in self.indices_required_from_me], 
-                Config.train_iter, Config.step, 
-                vcr_type="constant", scorer_type="learnable")
+                [value[ind] for ind in self.indices_required_from_me])
             if type(compressed_send_tensors) is tuple:
                 compressed_recv_tensors = []
                 for i in range(len(compressed_send_tensors)):
@@ -75,11 +74,9 @@ class ProxyDataView(MutableMapping):
                 compressed_recv_tensors = tuple(compressed_recv_tensors)
             else:
                 compressed_recv_tensors = simple_exchange_op(*compressed_send_tensors)
-            recv_tensors = self.dist_block.compression_decompression.decompress(
-                compressed_recv_tensors)
+            recv_tensors = self.dist_block.compression_decompression.decompress(compressed_recv_tensors)
             recv_tensors[rank()] = value[self.indices_required_from_me[rank()]]
             exchange_result = torch.cat(recv_tensors, dim=-2)
-
         logger.debug(f'exchange_result {exchange_result.size()}')
 
         self.base_dict[key] = exchange_result
@@ -127,9 +124,6 @@ class DistributedBlock:
     :type seeds: Tensor
     :param edge_type_names: A list of edge type names 
     :type edge_type_names: List[str]
-    :param compressors: A list of learnable compressor modules for each remote client that compresses the outgoing
-    node features
-    :type compressors: List[nn.Module]
 
     """
 

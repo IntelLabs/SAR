@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+from secrets import choice
 from typing import List, Union, Dict
 from argparse import ArgumentParser
 import os
@@ -112,6 +113,9 @@ parser.add_argument('--compression_ratio_b', default=None, type=float,
 parser.add_argument('--compression_ratio_a', default=None, type=float, 
                     help="Compression ratio slope for client-wise compression channel-set")
 
+parser.add_argument('--comp_ratio', default=None, type=int, 
+                    help="Compression ratio for sub-graph based compression")
+
 parser.add_argument('--compression_step', default=None, type=int, 
                     help="Number of training iteration after which compression ratio changes")
 
@@ -139,7 +143,6 @@ class GNNModel(nn.Module):
 
         assert n_layers >= 1, 'GNN must have at least one layer'
         dims = [input_feature_dim] + [layer_dim] * (n_layers-1) + [n_classes]
-        print(dims)
 
         self.convs = nn.ModuleList()
         for idx in range(len(dims) - 1):
@@ -300,6 +303,7 @@ def main():
     Config.total_layers = args.n_layers
     Config.total_train_iter = args.train_iters
     Config.step = args.compression_step
+    Config.compression_type = args.compression_type
     # Create log directory
     writer = SummaryWriter(f"{args.log_dir}/ogbn-arxiv/lr={args.lr}/n_clients={args.world_size}/rank={args.rank}")
 
@@ -388,8 +392,7 @@ def main():
                 comp_mod = NodeCompressorDecompressor(
                         feature_dim=feature_dim,
                         comp_ratio_b=[float(args.compression_ratio_b)] * args.n_layers,
-                        comp_ratio_a=[float(args.compression_ratio_a)] * args.n_layers,
-                        step=args.compression_step
+                        comp_ratio_a=[float(args.compression_ratio_a)] * args.n_layers
                     )
             elif args.compression_type == "subgraph":
                 comp_mod = SubgraphCompressorDecompressor(
@@ -397,8 +400,7 @@ def main():
                         full_local_graph=full_graph_manager,
                         indices_required_from_me=indices_required_from_me,
                         tgt_node_range=tgt_node_range,
-                        comp_ratio_b=[float(args.compression_ratio_b)] * args.n_layers,
-                        comp_ratio_a=[float(args.compression_ratio_a)] * args.n_layers
+                        comp_ratio=args.comp_ratio
                 )
             else:
                 raise NotImplementedError("Undefined compression_type." 
@@ -490,7 +492,10 @@ def main():
         writer.add_scalar("Accuracy/valid", val_acc.item(), train_iter_idx)
         writer.add_scalar("Accuracy/test", test_acc.item(), train_iter_idx)
         
-
+    with open("result.txt", "a") as f:
+        f.writelines("="*100 + "\n")
+        f.writelines(f"final accuracy: {model_acc.item()}" + "\n")
+        f.writelines("="*100 + "\n\n")
 
 if __name__ == '__main__':
     main()

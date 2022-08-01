@@ -56,3 +56,4 @@ class Config(object):
     total_layers: int = None
     train_iter: int = 0
     total_train_iter: int = 0
+    compression_type: str = None

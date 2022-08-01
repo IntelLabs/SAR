@@ -7,3 +7,4 @@ partition_data/
 log/
 */examples/log/
 datasets/*
+*txt
