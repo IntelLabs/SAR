@@ -24,6 +24,7 @@ from argparse import ArgumentParser
 import os
 import logging
 import time
+from matplotlib import pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -386,13 +387,12 @@ def main():
             if args.compression_type == "feature":
                 comp_mod = FeatureCompressorDecompressor(
                         feature_dim=feature_dim,
-                        comp_ratio= [float(args.compression_ratio_b)] * args.n_layers
+                        comp_ratio= [float(args.comp_ratio)] * args.n_layers
                     )
             elif args.compression_type == "node":
                 comp_mod = NodeCompressorDecompressor(
                         feature_dim=feature_dim,
-                        comp_ratio_b=[float(args.compression_ratio_b)] * args.n_layers,
-                        comp_ratio_a=[float(args.compression_ratio_a)] * args.n_layers
+                        comp_ratio=args.comp_ratio
                     )
             elif args.compression_type == "subgraph":
                 comp_mod = SubgraphCompressorDecompressor(
@@ -465,9 +465,10 @@ def main():
                        masks,
                        labels,
                        args.construct_mfgs)
-        if val_acc >= best_val_acc:
-            best_val_acc = val_acc
-            model_acc = test_acc
+        if (train_iter_idx + 1) % args.fed_agg_round == 0:
+            if val_acc >= best_val_acc:
+                best_val_acc = val_acc
+                model_acc = test_acc
         result_message = (
             f"iteration [{train_iter_idx}/{args.train_iters}] | "
         )
@@ -494,8 +495,11 @@ def main():
         
     with open("result.txt", "a") as f:
         f.writelines("="*100 + "\n")
+        f.writelines(f"STEP={Config.step}\n")
         f.writelines(f"final accuracy: {model_acc.item()}" + "\n")
+        f.writelines(f"Entropy: {Config.entropy}, MI: {sum(Config.mi_leak)}")
         f.writelines("="*100 + "\n\n")
 
+    plt.plot(Config.mi_leak)
 if __name__ == '__main__':
     main()

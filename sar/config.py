@@ -57,3 +57,6 @@ class Config(object):
     train_iter: int = 0
     total_train_iter: int = 0
     compression_type: str = None
+    mi_leak = []
+    entropy: float = 0
+    step: int = 32

@@ -46,19 +46,16 @@ class FeatureCompressorDecompressor(CompressorDecompressorBase):
         self.decompressors = nn.ModuleDict()
         for i, f in enumerate(feature_dim):
             k = floor(f/comp_ratio[Config.current_layer_index])
+            print(f"{f} -> {k} -> {f}")
             self.compressors[f"layer_{i}"] = nn.Sequential(
-                nn.Linear(f, f),
-                nn.ReLU(),
                 nn.Linear(f, k),
                 nn.ReLU()
             )
             self.decompressors[f"layer_{i}"] = nn.Sequential(
-                nn.Linear(k, f),
-                nn.ReLU(),
-                nn.Linear(f, f)
+                nn.Linear(k, f)
             )
     
-    def compress(self, tensors_l: List[Tensor], iter: int = 0):
+    def compress(self, tensors_l: List[Tensor], iter: int = 0, vcr_type=None, scorer_type=None):
         '''
         Take a list of tensors and return a list of compressed tensors
         '''
@@ -92,8 +89,9 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
     def __init__(
         self, 
         feature_dim: List[int], 
-        comp_ratio_b: List[float],
-        comp_ratio_a: List[float]):
+        comp_ratio_b: List[float] = None,
+        comp_ratio_a: List[float] = None,
+        comp_ratio: int = None):
         """
         Compresses and decompresses along node dimension by selecting
         a fraction of nodes at the compressor and replacing them by 0
@@ -105,6 +103,7 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
         self.scorer = nn.ModuleDict()
         self.comp_ratio_b = comp_ratio_b
         self.comp_ratio_a = comp_ratio_a
+        self.comp_ratio = comp_ratio
         for i, f in enumerate(feature_dim):
             self.scorer[f"layer_{i}"] = nn.Sequential(
                 nn.Linear(f, 1),
@@ -143,7 +142,7 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
                                 self.comp_ratio_a[Config.current_layer_index],
                                 step, iter)
         elif vcr_type == "constant":
-                comp_ratio = Config.total_train_iter // step
+                comp_ratio = self.comp_ratio
         else:
             raise NotImplementedError(
                 "vcr_type should be either exp or linear")
@@ -216,7 +215,7 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         full_local_graph,
         indices_required_from_me: List[Tensor],
         tgt_node_range: Tuple[int, int],
-        comp_ratio: int
+        comp_ratio: int = None
     ):
         super().__init__()
         self.full_local_graph = full_local_graph
@@ -239,6 +238,7 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
             )
             self.scorer[layer] = nn.Linear(f, 1)
             self.unpack[layer] = nn.ModuleList([
+                SageConvExt(f, f, update_func="diffuse"),
                 SageConvExt(f, f, update_func="diffuse")]
             )
         # Create induced subgraphs for source nodes
@@ -292,7 +292,11 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
 
     def compress(
         self, 
-        tensors_l: List[Tensor]):
+        tensors_l: List[Tensor],
+        iter: int = 0,
+        step: int = 32,
+        vcr_type=None,
+        scorer_type=None):
         """
         Take a list of tensors and return a list of compressed tensors
 
@@ -310,7 +314,22 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
 
         compressed_tensors_l = []
         sel_indices = []
-        comp_ratio = max(1, self.comp_ratio)
+        if self.comp_ratio is None:
+            if vcr_type == "exp":
+                comp_ratio = compute_CR_exp(step, iter)
+            elif vcr_type == "linear":
+                comp_ratio = compute_CR_linear(
+                                    self.comp_ratio_b[Config.current_layer_index],
+                                    self.comp_ratio_a[Config.current_layer_index],
+                                    step, iter)
+            elif vcr_type == "constant":
+                    comp_ratio = self.comp_ratio
+            else:
+                raise NotImplementedError(
+                    "vcr_type should be either exp or linear")
+            comp_ratio = max(1, comp_ratio)
+        else:
+            comp_ratio = max(1, self.comp_ratio)
         for i, val in enumerate(tensors_l):
             if Config.current_layer_index == 0:
                 g = self.induced_boundary_graphs[i]
