@@ -112,11 +112,24 @@ parser.add_argument('--enable_cr', action='store_true',
                     default=False, help="Turn on compression before \
                     sending to remote clients")
 
+parser.add_argument('--n_kernel', default=None, type=int,
+                    help='Number of channels in the fixed compression channel-set')
+
+parser.add_argument('--log_dir', default="log", type=str,
+                    help='Parent directory for logging')
+
+parser.add_argument('--fed_agg_round', default=501, type=int, 
+                    help='number of training iterations after \
+                        which weights across clients will \
+                            be aggregated')
+
+# Newly added arguments for compression decompression module
 parser.add_argument('--comp_ratio', default=None, type=int, 
                     help="Compression ratio for sub-graph based compression")
 
-parser.add_argument('--compression_type', default=None, type=str, 
-                    help="Compression type")
+parser.add_argument('--compression_type', default="feature", type=str, 
+                    choices=["feature", "node", "subgraph"], 
+                    help="Choose among three possible compression types")
 
 parser.add_argument('--enable_vcr', action='store_true', 
                     default=False, help="Turn on variable compression ratio")
@@ -125,19 +138,6 @@ parser.add_argument('--compression_step', default=None, type=int,
                     help="Number of training iteration after which compression ratio \
                         changes for variable compression ratio")
 
-parser.add_argument('--n_kernel', default=None, type=int,
-                    help='Number of channels in the fixed compression channel-set')
-
-parser.add_argument('--log_dir', default="log/fed", type=str,
-                    help='Parent directory for logging')
-
-parser.add_argument('--disable_cut_edges', action="store_true", 
-                    help="Stop embedding sharing between clients")
-
-parser.add_argument('--fed_agg_round', default=501, type=int, 
-                    help='number of training iterations after \
-                        which weights across clients will \
-                            be aggregated')
 
 class GNNModel(nn.Module):
     def __init__(self,  gnn_layer: str, n_layers: int, layer_dim: int,

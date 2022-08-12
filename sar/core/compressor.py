@@ -226,7 +226,9 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
     and communication overhead (since it's a compressed representation). To learn this
     representation, the compressor first passes the node features through a GNN using the 
     induced subgraph. Then it uses a ranking module to pool a subset of node representation 
-    and sends them. Upon receiving, the remote client diffuses these representation using 
+    and sends them. This is only applied to the raw features (layer=0) of the nodes and 
+    not on the hidden representation of the GNN. 
+    Upon receiving, the remote client diffuses these representation using 
     the induced subgraph structure.
 
     :param feature_dim: List of integers representing the feature dimensions at each GNN layer.
@@ -239,7 +241,7 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
     :param tgt_node_range: Node ranges for target clients.
     :type tgt_node_range: Tuple[int, int]
     :param comp_ratio: Fixed compression ratio. n_nodes/comp_ratio nodes will be sent.
-    :type comp_ratio: int
+    :type comp_ratio: float
     """
 
     def __init__(
@@ -248,7 +250,7 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         full_local_graph,
         indices_required_from_me: List[Tensor],
         tgt_node_range: Tuple[int, int],
-        comp_ratio: int = None
+        comp_ratio: float = None
     ):
         super().__init__()
         self.full_local_graph = full_local_graph
@@ -259,10 +261,6 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         self.pack = nn.ModuleDict()     # GCN module to aggregate information
         self.scorer = nn.ModuleDict()   # Ranking module
         self.unpack = nn.ModuleDict()   # GCN module to diffuse information
-        self.normalize_remote = \
-            nn.ModuleDict()             # Projects remote neighbors to a common distribution
-        self.normalize_local = \
-            nn.ModuleDict()             # Projects local neighbors to common distribribution
 
         for i, f in enumerate(feature_dim):
             layer = f"layer_{i}"
