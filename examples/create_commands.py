@@ -11,7 +11,7 @@ STEP = TRAIN_ITER // COMP_RATIO
 
 LOG_DIR_FCR = f"log/fixed_cr/{COMP_TYPE}/CR={COMP_RATIO}/K={ROUND}"
 LOG_DIR_VCR = f"log/varying_cr/{COMP_TYPE}/CR={TRAIN_ITER//STEP}/K={ROUND}"
-EXP = "sc"
+EXP = "fcr"
 TRIALS = 1
 
 for i in range(N_CLIENTS):
@@ -26,7 +26,7 @@ for i in range(N_CLIENTS):
 with open(f"commands.sh", "w") as f:
     f.writelines("#!/bin/bash\n\n")
     for t in range(TRIALS):
-        if EXP == "lc":
+        if EXP == "fcr":
             for c in cmd_fcr:
                 f.writelines(c)
         elif EXP == "vcr":
