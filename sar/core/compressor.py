@@ -16,6 +16,7 @@ from sar.core.custom_models import SageConvExt
 
 logger = logging.getLogger(__name__)
 
+
 class CompressorDecompressorBase(nn.Module):
     '''
     Base class for all communication compression modules
@@ -40,6 +41,19 @@ class CompressorDecompressorBase(nn.Module):
 
 class FeatureCompressorDecompressor(CompressorDecompressorBase):
     def __init__(self, feature_dim: List[int], comp_ratio: List[float]):
+        """
+        A feature-based compression decompression module. The compressor compresses outgoing
+        tensor along feature dimension and decompresses it back to original size on the receiving
+        client side. The model follows a autoencoder like architecture where sending client uses the
+        encoder and receiving client uses the decoder.
+
+        :param feature_dim: A list of feature dimension for each layer of GNN including input layer.
+        :type feature_dim: List[int]
+        :param comp_ratio: A list of compression ratio for each layer of GNN to allow different
+        compression ratio for different layers.
+        :type comp_ratio: List[float]
+        """
+
         super().__init__()
         self.feature_dim = feature_dim
         self.compressors = nn.ModuleDict()
@@ -55,9 +69,13 @@ class FeatureCompressorDecompressor(CompressorDecompressorBase):
                 nn.Linear(k, f)
             )
     
-    def compress(self, tensors_l: List[Tensor], iter: int = 0, vcr_type=None, scorer_type=None):
+    def compress(self, tensors_l: List[Tensor], iter: int = 0, enable_vcr=None, scorer_type=None):
         '''
         Take a list of tensors and return a list of compressed tensors
+
+        :param iter: Ignore. Added for compatiability.
+        :param enable_vcr: Ignore. Added for compatiability.
+        :param scorer_type: Ignore, Added for compatiability.
         '''
             # Send data to each client using same compression module
         logger.debug(f"index: {Config.current_layer_index}, tensor_sz: {tensors_l[0].shape}")
@@ -84,25 +102,37 @@ def compute_CR_linear(init_CR, slope, step, iter):
     # Decrease CR using b - a*x
     return init_CR - slope * (iter// step)
 
+def pool(val, score, k):
+    sel_scores, idx = torch.topk(score, k=k, dim=0)
+    idx = idx.squeeze(-1)
+    new_val = torch.mul(val[idx, :], sel_scores)
+    return new_val, idx
+
 
 class NodeCompressorDecompressor(CompressorDecompressorBase):
+    """
+    A node-based compression decompression module. The sending client selects a subset of nodes
+    that it needs to send and the receiving client replaces the missing nodes with 0. It consists 
+    of a ranking module which ranks the node based on their feature using a one-layer neural network.
+    Then it selects a fraction of the nodes based on compression ratio. The compression ratio can be
+    fixed or variable over training iterations. This whole ranking and selection process is similar
+    to pooling operator in Graph-UNet (https://github.com/HongyangGao/Graph-U-Nets/blob/master/src/utils/ops.py#L64)
+
+    :param feature_dim: A list of feature dimension for each layer of GNN including input layer.
+    :type feature_dim: List[int]
+    :param comp_ratio: A list of compression ratio for each layer of GNN to allow different
+    compression ratio for different layers.
+    :type comp_ratio: List[float] 
+    """
+
     def __init__(
         self, 
-        feature_dim: List[int], 
-        comp_ratio_b: List[float] = None,
-        comp_ratio_a: List[float] = None,
+        feature_dim: List[int],
         comp_ratio: int = None):
-        """
-        Compresses and decompresses along node dimension by selecting
-        a fraction of nodes at the compressor and replacing them by 0
-        at the decompressor.
-        """
-
+        
         super().__init__()
         self.feature_dim = feature_dim
         self.scorer = nn.ModuleDict()
-        self.comp_ratio_b = comp_ratio_b
-        self.comp_ratio_a = comp_ratio_a
         self.comp_ratio = comp_ratio
         for i, f in enumerate(feature_dim):
             self.scorer[f"layer_{i}"] = nn.Sequential(
@@ -115,7 +145,7 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
         tensors_l: List[Tensor],
         iter: int = 0,
         step: int = 32,
-        vcr_type: str = "constant",
+        enable_vcr: str = False,
         scorer_type: str = "learnable"):
         """
         Take a list of tensors and return a list of compressed tensors
@@ -126,7 +156,7 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
         :type int
         :param step: Number of steps for which CR is constant
         :type int
-        :param vcr_type: Method by which CR will be changed through out the training
+        :param enable_vcr: Enable variable compression ratio
         :type str
         :param scorer_type: Module type by which the nodes will be ranked before sending
         :type str
@@ -134,34 +164,32 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
 
         compressed_tensors_l = []
         sel_indices = []
-        if vcr_type == "exp":
+
+        # Compute compression ratio
+        if enable_vcr:
             comp_ratio = compute_CR_exp(step, iter)
-        elif vcr_type == "linear":
-            comp_ratio = compute_CR_linear(
-                                self.comp_ratio_b[Config.current_layer_index],
-                                self.comp_ratio_a[Config.current_layer_index],
-                                step, iter)
-        elif vcr_type == "constant":
-                comp_ratio = self.comp_ratio
         else:
-            raise NotImplementedError(
-                "vcr_type should be either exp or linear")
-        
+            assert self.comp_ratio is not None, \
+                "Compression ratio can't be None for fixed compression ratio"
+            comp_ratio = self.comp_ratio
         comp_ratio = max(1, comp_ratio)
+
         for val in tensors_l:
+            # Compute ranking scores
             if scorer_type == "learnable":
                 score = self.scorer[f"layer_{Config.current_layer_index}"](val)
             elif scorer_type == "random":
                 score = torch.rand(val.shape[0], 1)
+                score = torch.sigmoid(score)
             else:
                 raise NotImplementedError(
                     "Scorer type should be either learnable or random")
             k = val.shape[0] // comp_ratio
-            k = max(1, k) # Send at least 1 node if CR is too high.
-            _, idx = torch.topk(score, k=k, dim=0)
-            idx = idx.squeeze(-1)
-            compressed_tensors_l.append(val[idx, :])
+            k = max(1, k) # Send at least 1 node if CR is too high for compatiability
+            new_val, idx = pool(val, score, k)
+            compressed_tensors_l.append(new_val)
             sel_indices.append(idx)
+        
         return compressed_tensors_l, sel_indices
     
     def decompress(
@@ -236,7 +264,10 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
             self.pack[layer] = nn.ModuleList([
                 dgl.nn.SAGEConv(f, f, aggregator_type='mean')]
             )
-            self.scorer[layer] = nn.Linear(f, 1)
+            self.scorer[layer] = nn.Sequential(
+                nn.Linear(f, 1),
+                nn.Sigmoid()
+            )
             self.unpack[layer] = nn.ModuleList([
                 SageConvExt(f, f, update_func="diffuse"),
                 SageConvExt(f, f, update_func="diffuse")]
@@ -295,7 +326,7 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         tensors_l: List[Tensor],
         iter: int = 0,
         step: int = 32,
-        vcr_type=None,
+        enable_vcr=False,
         scorer_type=None):
         """
         Take a list of tensors and return a list of compressed tensors
@@ -306,30 +337,22 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         :type int
         :param step: Number of steps for which CR is constant
         :type int
-        :param vcr_type: Method by which CR will be changed through out the training
-        :type str
-        :param scorer_type: Module type by which the nodes will be ranked before sending
+        :param enable_vcr: Enable variable compression ratio
+        :type bool
+        :param scorer_type: Ignore. Added for compatiability
         :type str
         """
 
         compressed_tensors_l = []
         sel_indices = []
-        if self.comp_ratio is None:
-            if vcr_type == "exp":
-                comp_ratio = compute_CR_exp(step, iter)
-            elif vcr_type == "linear":
-                comp_ratio = compute_CR_linear(
-                                    self.comp_ratio_b[Config.current_layer_index],
-                                    self.comp_ratio_a[Config.current_layer_index],
-                                    step, iter)
-            elif vcr_type == "constant":
-                    comp_ratio = self.comp_ratio
-            else:
-                raise NotImplementedError(
-                    "vcr_type should be either exp or linear")
-            comp_ratio = max(1, comp_ratio)
+        if enable_vcr:
+            comp_ratio = compute_CR_exp(step, iter)
         else:
-            comp_ratio = max(1, self.comp_ratio)
+            assert self.comp_ratio is not None, \
+                "Compression ratio can't be None for fixed compression ratio"
+            comp_ratio = self.comp_ratio
+        comp_ratio = max(1, comp_ratio)
+
         for i, val in enumerate(tensors_l):
             if Config.current_layer_index == 0:
                 g = self.induced_boundary_graphs[i]
@@ -341,9 +364,8 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
             score = self.scorer[f"layer_{Config.current_layer_index}"](val)
             k = val.shape[0] // comp_ratio
             k = max(1, k) # Send at least 1 node if CR is too high.
-            _, idx = torch.topk(score, k=k, dim=0)
-            idx = idx.squeeze(-1)
-            compressed_tensors_l.append(val[idx, :])
+            new_val, idx = pool(val, score, k)
+            compressed_tensors_l.append(new_val)
             sel_indices.append(idx)
         return compressed_tensors_l, sel_indices, \
             self.edges_src_nodes, self.edges_tgt_nodes
@@ -353,6 +375,12 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         args):
         '''
         Decompress received tensors by creating properly shaped recv tensors
+
+        :param args: List of received messages. First entry of the list is the 
+        node features received. Second entry is indices of the nodes that were sent.
+        Third and fourth entries are the src and tgt of the induces subgraph and the last
+        entry is the number of total nodes sent from each remote clients.
+        :type args: List[List[Tensor]]
         '''
 
         channel_feat = args[0]

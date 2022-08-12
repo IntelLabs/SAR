@@ -60,3 +60,5 @@ class Config(object):
     mi_leak = []
     entropy: float = 0
     step: int = 32
+    enable_cr: bool = False
+    enable_vcr: bool = False

@@ -77,59 +77,65 @@ class ProxyDataView(MutableMapping):
 
         with profiler.record_function("COMM_FETCH"):
             logger.debug(f'compression decompression: {rank()}')
-            compressed_send_tensors = self.dist_block.compression_decompression.compress(
-                [value[ind] for ind in self.indices_required_from_me],
-                iter=Config.train_iter, step=Config.step)
-            # =====================================================================
-            # Code for MI calculation
-            # first decompress locally
-            # Compute mutual information for each feature dimension individually and
-            # average them. Sum them up over iterations.
-            # if Config.current_layer_index == 0 and Config.train_iter % 2 == 0:
-            #     X = [value[ind] for ind in self.indices_required_from_me]
-            #     with torch.no_grad():
-            #         # Decompress locally
-            #         if type(compressed_send_tensors) is tuple:
-            #             # subgraph based
-            #             sizes = [len(ind) for ind in self.indices_required_from_me]
-            #             Y = list(compressed_send_tensors)
-            #             Y.append(sizes)
-            #             Y = self.dist_block.compression_decompression.decompress(tuple(Y))
-            #         else:
-            #             # feature based
-            #             Y = self.dist_block.compression_decompression.decompress(compressed_send_tensors)
-            #     total_mi = 0
-            #     for i in range(0, len(X)):
-            #         if i == rank():
-            #             continue
-            #         total_mi += compute_MI(X[i].detach().cpu().numpy(), Y[i].detach().cpu().numpy())
-                
-            #     if Config.train_iter == 0:
-            #         total_ent = 0
-            #         for i, x in enumerate(X):
-            #             if i == rank():
-            #                 continue
-            #             total_ent += compute_MI(x.detach().cpu().numpy(), x.detach().cpu().numpy())
-            #         Config.entropy += total_ent
-            #         print(f"Entropy: {Config.entropy}")
-                
-            #     total_mi /= Config.entropy
-            #     Config.mi_leak.append(total_mi)
-            #     print(f"current_leak: {total_mi}, total_leak: {sum(Config.mi_leak)}")
-            # ==========================================================================
+            send_tensors = [value[ind] for ind in self.indices_required_from_me]
+            if Config.enable_cr:
+                compressed_send_tensors = self.dist_block.compression_decompression.compress(
+                                                    send_tensors, iter=Config.train_iter, 
+                                                    step=Config.step, enable_vcr=Config.enable_vcr)
+                # =====================================================================
+                # Code for MI calculation. This part slows down the training significantly.
+                # So I am commenting it out.
+                # first decompress locally
+                # Compute mutual information for each feature dimension individually and
+                # average them. Sum them up over iterations.
+                # if Config.current_layer_index == 0 and Config.train_iter % 2 == 0:
+                #     X = [value[ind] for ind in self.indices_required_from_me]
+                #     with torch.no_grad():
+                #         # Decompress locally
+                #         if type(compressed_send_tensors) is tuple:
+                #             # subgraph based
+                #             sizes = [len(ind) for ind in self.indices_required_from_me]
+                #             Y = list(compressed_send_tensors)
+                #             Y.append(sizes)
+                #             Y = self.dist_block.compression_decompression.decompress(tuple(Y))
+                #         else:
+                #             # feature based
+                #             Y = self.dist_block.compression_decompression.decompress(compressed_send_tensors)
+                #     total_mi = 0
+                #     for i in range(0, len(X)):
+                #         if i == rank():
+                #             continue
+                #         total_mi += compute_MI(X[i].detach().cpu().numpy(), Y[i].detach().cpu().numpy())
+                    
+                #     if Config.train_iter == 0:
+                #         total_ent = 0
+                #         for i, x in enumerate(X):
+                #             if i == rank():
+                #                 continue
+                #             total_ent += compute_MI(x.detach().cpu().numpy(), x.detach().cpu().numpy())
+                #         Config.entropy += total_ent
+                #         print(f"Entropy: {Config.entropy}")
+                    
+                #     total_mi /= Config.entropy
+                #     Config.mi_leak.append(total_mi)
+                #     print(f"current_leak: {total_mi}, total_leak: {sum(Config.mi_leak)}")
+                # ==========================================================================
 
-            if type(compressed_send_tensors) is tuple:
-                compressed_recv_tensors = []
-                for i in range(len(compressed_send_tensors)):
-                    compressed_recv_tensors.append(
-                        list(simple_exchange_op(*compressed_send_tensors[i])))
-                compressed_recv_tensors.append(self.sizes_expected_from_others)
-                compressed_recv_tensors = tuple(compressed_recv_tensors)
+                if type(compressed_send_tensors) is tuple:
+                    compressed_recv_tensors = []
+                    for i in range(len(compressed_send_tensors)):
+                        compressed_recv_tensors.append(
+                            list(simple_exchange_op(*compressed_send_tensors[i])))
+                    compressed_recv_tensors.append(self.sizes_expected_from_others)
+                    compressed_recv_tensors = tuple(compressed_recv_tensors)
+                else:
+                    compressed_recv_tensors = simple_exchange_op(*compressed_send_tensors)
+                recv_tensors = self.dist_block.compression_decompression.decompress(compressed_recv_tensors)
+                recv_tensors[rank()] = value[self.indices_required_from_me[rank()]]
             else:
-                compressed_recv_tensors = simple_exchange_op(*compressed_send_tensors)
-            recv_tensors = self.dist_block.compression_decompression.decompress(compressed_recv_tensors)
-            recv_tensors[rank()] = value[self.indices_required_from_me[rank()]]
+                recv_tensors = simple_exchange_op(*send_tensors)
             exchange_result = torch.cat(recv_tensors, dim=-2)
+        
         logger.debug(f'exchange_result {exchange_result.size()}')
 
         self.base_dict[key] = exchange_result
