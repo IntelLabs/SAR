@@ -60,7 +60,6 @@ class FeatureCompressorDecompressor(CompressorDecompressorBase):
         self.decompressors = nn.ModuleDict()
         for i, f in enumerate(feature_dim):
             k = floor(f/comp_ratio[Config.current_layer_index])
-            print(f"{f} -> {k} -> {f}")
             self.compressors[f"layer_{i}"] = nn.Sequential(
                 nn.Linear(f, k),
                 nn.ReLU()
@@ -77,7 +76,7 @@ class FeatureCompressorDecompressor(CompressorDecompressorBase):
         :param enable_vcr: Ignore. Added for compatiability.
         :param scorer_type: Ignore, Added for compatiability.
         '''
-            # Send data to each client using same compression module
+        # Send data to each client using same compression module
         logger.debug(f"index: {Config.current_layer_index}, tensor_sz: {tensors_l[0].shape}")
         tensors_l = [self.compressors[f"layer_{Config.current_layer_index}"](val)
                             if Config.current_layer_index < Config.total_layers - 1 
@@ -158,7 +157,10 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
         :type int
         :param enable_vcr: Enable variable compression ratio
         :type str
-        :param scorer_type: Module type by which the nodes will be ranked before sending
+        :param scorer_type: Module by which the nodes will be ranked before sending. 
+        There are two possible types: "learnable" / "random". In learnable scorer, the
+        scores will be computed by one-layer neural network based on features of the nodes.
+        In case of "random", the nodes will be selected randomly. Default: "learnable"
         :type str
         """
 
@@ -169,7 +171,7 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
         if enable_vcr:
             comp_ratio = compute_CR_exp(step, iter)
         else:
-            assert self.comp_ratio is not None, \
+            assert self.comp_ratio is None, \
                 "Compression ratio can't be None for fixed compression ratio"
             comp_ratio = self.comp_ratio
         comp_ratio = max(1, comp_ratio)
@@ -217,12 +219,15 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
 
 class SubgraphCompressorDecompressor(CompressorDecompressorBase):
     """
-    A class to perform subgraph-based compression decompression mechanism.
+    A class to perform the subgraph-based compression decompression mechanism.
     While sending a set of node features to remote clients this class sends a 
     representation of the subgraph induced by those nodes. This representation
     is better both in terms of privacy (since it's not a node-specific representation) 
-    and communication overhead (since it's a compressed representation). Upon receiving,
-    the remote client diffuses these representation using the induced subgraph structure.
+    and communication overhead (since it's a compressed representation). To learn this
+    representation, the compressor first passes the node features through a GNN using the 
+    induced subgraph. Then it uses a ranking module to pool a subset of node representation 
+    and sends them. Upon receiving, the remote client diffuses these representation using 
+    the induced subgraph structure.
 
     :param feature_dim: List of integers representing the feature dimensions at each GNN layer.
     :type feature_dim: List[int]
