@@ -1,12 +1,12 @@
 N_CLIENTS = 10
-ROUND = 1
+ROUND = 10
 cmd_lc = []
 cmd_nc = []
 cmd_rc = []
 cmd_sc = []
 cmd_vrc = []
 cmd_sc_vcr = []
-COMP_TYPE = "feature"
+COMP_TYPE = "node"
 COMP_RATIO_A = "2"
 COMP_RATIO_B = "1024"
 
@@ -20,8 +20,8 @@ LOG_DIR_RC = f"log/full_graph/K={ROUND}"
 LOG_DIR_VCR = f"log/varying_channel/{COMP_TYPE}/CR={TRAIN_ITER//STEP}/K={ROUND}"
 LOG_DIR_SC = f"log/fixed_channel/subgraph/CR={COMP_RATIO}/K={ROUND}"
 LOG_DIR_SC_VCR = f"log/varying_channel/subgraph_vcr/CR={COMP_RATIO}/K={ROUND}"
-EXP = "sc-vcr"
-TRIALS = 2
+EXP = "lc"
+TRIALS = 1
 
 for i in range(N_CLIENTS):
     cmd_lc += f"python3 train_homogeneous_graph_advanced.py --partitioning-json-file ../partition_data/ogbn-arxiv.json \

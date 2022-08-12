@@ -441,8 +441,8 @@ def main():
     n_train_points = n_train_points.item()
 
     optimizer = torch.optim.Adam(gnn_model.parameters(), lr=args.lr)
-    best_val_acc = 0
-    model_acc = 0
+    best_val_acc = torch.Tensor(0)
+    model_acc = torch.Tensor(0)
     for train_iter_idx in range(args.train_iters):
         t_1 = time.time()
         Config.train_iter = train_iter_idx
@@ -465,6 +465,9 @@ def main():
                        masks,
                        labels,
                        args.construct_mfgs)
+        if train_iter_idx == 0:
+            best_val_acc = val_acc
+            model_acc = test_acc
         if (train_iter_idx + 1) % args.fed_agg_round == 0:
             if val_acc >= best_val_acc:
                 best_val_acc = val_acc

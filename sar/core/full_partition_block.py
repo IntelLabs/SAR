@@ -79,7 +79,7 @@ class ProxyDataView(MutableMapping):
             logger.debug(f'compression decompression: {rank()}')
             compressed_send_tensors = self.dist_block.compression_decompression.compress(
                 [value[ind] for ind in self.indices_required_from_me],
-                vcr_type="exp", iter=Config.train_iter, step=Config.step)
+                iter=Config.train_iter, step=Config.step)
             # =====================================================================
             # Code for MI calculation
             # first decompress locally

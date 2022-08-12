@@ -115,7 +115,7 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
         tensors_l: List[Tensor],
         iter: int = 0,
         step: int = 32,
-        vcr_type: str = "exp",
+        vcr_type: str = "constant",
         scorer_type: str = "learnable"):
         """
         Take a list of tensors and return a list of compressed tensors
