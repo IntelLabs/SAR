@@ -108,10 +108,6 @@ parser.add_argument('--n-layers', default=3, type=int,
 parser.add_argument('--layer-dim', default=256, type=int,
                     help='Dimension of GNN hidden layer')
 
-parser.add_argument('--enable_cr', action='store_true', 
-                    default=False, help="Turn on compression before \
-                    sending to remote clients")
-
 parser.add_argument('--n_kernel', default=None, type=int,
                     help='Number of channels in the fixed compression channel-set')
 
@@ -124,6 +120,10 @@ parser.add_argument('--fed_agg_round', default=501, type=int,
                             be aggregated')
 
 # Newly added arguments for compression decompression module
+parser.add_argument('--enable_cr', action='store_true', 
+                    default=False, help="Turn on compression before \
+                    sending to remote clients")
+                
 parser.add_argument('--comp_ratio', default=None, type=int, 
                     help="Compression ratio for sub-graph based compression")
 
