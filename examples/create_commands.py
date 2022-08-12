@@ -1,5 +1,5 @@
 N_CLIENTS = 10
-ROUND = 10
+ROUND = 1
 cmd_lc = []
 cmd_nc = []
 cmd_rc = []
@@ -11,7 +11,7 @@ COMP_RATIO_A = "2"
 COMP_RATIO_B = "1024"
 
 TRAIN_ITER = 512
-COMP_RATIO = 2
+COMP_RATIO = 4
 STEP = TRAIN_ITER // COMP_RATIO
 
 LOG_DIR_LC = f"log/fixed_channel/{COMP_TYPE}/CR={COMP_RATIO}/K={ROUND}"
@@ -25,7 +25,7 @@ TRIALS = 1
 
 for i in range(N_CLIENTS):
     cmd_lc += f"python3 train_homogeneous_graph_advanced.py --partitioning-json-file ../partition_data/ogbn-arxiv.json \
-        --log_dir {LOG_DIR_LC} --compression_type {COMP_TYPE} --comp_ratio {COMP_RATIO} --train-mode one_shot_aggregation --ip-file ip_file.txt --fed_agg_round {ROUND} --lr 1e-3 \
+        --log_dir {LOG_DIR_LC} --compression_type {COMP_TYPE} --comp_ratio {COMP_RATIO} --enable_cr --train-mode one_shot_aggregation --ip-file ip_file.txt --fed_agg_round {ROUND} --lr 1e-3 \
             --train-iters {TRAIN_ITER} --rank {i} --world-size {N_CLIENTS} --backend ccl &\n"
     cmd_nc += f"python3 fed_train_homogeneous_basic.py --partitioning-json-file ../partition_data/ogbn-arxiv.json \
         --log_dir {LOG_DIR_NC} --disable_cut_edges --ip-file ip_file.txt --fed_agg_round {ROUND} --lr 1e-3 \

@@ -108,20 +108,22 @@ parser.add_argument('--n-layers', default=3, type=int,
 parser.add_argument('--layer-dim', default=256, type=int,
                     help='Dimension of GNN hidden layer')
 
-parser.add_argument('--compression_ratio_b', default=None, type=float, 
-                    help="Initial Compression ratio for client-wise compression channel-set")
-
-parser.add_argument('--compression_ratio_a', default=None, type=float, 
-                    help="Compression ratio slope for client-wise compression channel-set")
+parser.add_argument('--enable_cr', action='store_true', 
+                    default=False, help="Turn on compression before \
+                    sending to remote clients")
 
 parser.add_argument('--comp_ratio', default=None, type=int, 
                     help="Compression ratio for sub-graph based compression")
 
-parser.add_argument('--compression_step', default=None, type=int, 
-                    help="Number of training iteration after which compression ratio changes")
-
 parser.add_argument('--compression_type', default=None, type=str, 
                     help="Compression type")
+
+parser.add_argument('--enable_vcr', action='store_true', 
+                    default=False, help="Turn on variable compression ratio")
+
+parser.add_argument('--compression_step', default=None, type=int, 
+                    help="Number of training iteration after which compression ratio \
+                        changes for variable compression ratio")
 
 parser.add_argument('--n_kernel', default=None, type=int,
                     help='Number of channels in the fixed compression channel-set')
@@ -303,8 +305,11 @@ def main():
     use_gpu = torch.cuda.is_available() and not args.cpu_run
     Config.total_layers = args.n_layers
     Config.total_train_iter = args.train_iters
-    Config.step = args.compression_step
+    Config.enable_cr = args.enable_cr
     Config.compression_type = args.compression_type
+    Config.step = args.compression_step
+    Config.enable_vcr = args.enable_vcr
+    
     # Create log directory
     writer = SummaryWriter(f"{args.log_dir}/ogbn-arxiv/lr={args.lr}/n_clients={args.world_size}/rank={args.rank}")
 
