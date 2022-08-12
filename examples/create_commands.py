@@ -20,7 +20,7 @@ LOG_DIR_RC = f"log/full_graph/K={ROUND}"
 LOG_DIR_VCR = f"log/varying_channel/{COMP_TYPE}/CR={TRAIN_ITER//STEP}/K={ROUND}"
 LOG_DIR_SC = f"log/fixed_channel/subgraph/CR={COMP_RATIO}/K={ROUND}"
 LOG_DIR_SC_VCR = f"log/varying_channel/subgraph_vcr/CR={COMP_RATIO}/K={ROUND}"
-EXP = "lc"
+EXP = "sc"
 TRIALS = 1
 
 for i in range(N_CLIENTS):
@@ -38,7 +38,7 @@ for i in range(N_CLIENTS):
             --compression_ratio_a {COMP_RATIO_A} --compression_step {STEP} --train-mode one_shot_aggregation --ip-file ip_file.txt --fed_agg_round {ROUND} --lr 1e-3 \
             --train-iters {TRAIN_ITER} --rank {i} --world-size {N_CLIENTS} --backend ccl &\n"
     cmd_sc += f"python3 train_homogeneous_graph_advanced.py --partitioning-json-file ../partition_data/ogbn-arxiv.json \
-        --log_dir {LOG_DIR_SC} --comp_ratio {COMP_RATIO} --compression_type subgraph --train-mode one_shot_aggregation --ip-file ip_file.txt --fed_agg_round {ROUND} --lr 1e-3 \
+        --log_dir {LOG_DIR_SC} --comp_ratio {COMP_RATIO} --enable_cr --compression_type subgraph --train-mode one_shot_aggregation --ip-file ip_file.txt --fed_agg_round {ROUND} --lr 1e-3 \
             --train-iters {TRAIN_ITER} --rank {i} --world-size {N_CLIENTS} --backend ccl &\n"
     cmd_sc_vcr += f"python3 train_homogeneous_graph_advanced.py --partitioning-json-file ../partition_data/ogbn-arxiv.json \
         --log_dir {LOG_DIR_SC} --compression_step {STEP} --compression_type subgraph --train-mode one_shot_aggregation --ip-file ip_file.txt --fed_agg_round {ROUND} --lr 1e-3 \
