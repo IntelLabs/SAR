@@ -121,13 +121,13 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
     :type feature_dim: List[int]
     :param comp_ratio: A list of compression ratio for each layer of GNN to allow different
     compression ratio for different layers.
-    :type comp_ratio: List[float] 
+    :type comp_ratio: float
     """
 
     def __init__(
         self, 
         feature_dim: List[int],
-        comp_ratio: int = None):
+        comp_ratio: float):
         
         super().__init__()
         self.feature_dim = feature_dim
@@ -171,7 +171,7 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
         if enable_vcr:
             comp_ratio = compute_CR_exp(step, iter)
         else:
-            assert self.comp_ratio is None, \
+            assert self.comp_ratio is not None, \
                 "Compression ratio can't be None for fixed compression ratio"
             comp_ratio = self.comp_ratio
         comp_ratio = max(1, comp_ratio)
@@ -250,7 +250,7 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         full_local_graph,
         indices_required_from_me: List[Tensor],
         tgt_node_range: Tuple[int, int],
-        comp_ratio: float = None
+        comp_ratio: float
     ):
         super().__init__()
         self.full_local_graph = full_local_graph

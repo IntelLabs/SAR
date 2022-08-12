@@ -10,7 +10,7 @@ STEP = TRAIN_ITER // COMP_RATIO
 
 LOG_DIR_FCR = f"log/fixed_cr/{COMP_TYPE}/CR={COMP_RATIO}/K={ROUND}"
 LOG_DIR_VCR = f"log/varying_cr/{COMP_TYPE}/CR={TRAIN_ITER//STEP}/K={ROUND}"
-EXP = "fcr"
+EXP = "vcr"
 TRIALS = 2
 for t in range(TRIALS):
     LOG_DIR_FCR = f"log/fixed_cr/{COMP_TYPE}/CR={COMP_RATIO}/K={ROUND}/TRIAL={t}"
