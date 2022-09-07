@@ -50,10 +50,12 @@ The original feature is a list of integers corresponding to input dimension of e
 compression ratio for each layer. This enables the use of different compression ratio for different layers.
 
 ::
+
     feature_dim = [features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels]
     compression_ratio = [float(args.comp_ratio)] * args.n_layers                               # Using same ratio for every layer but you can change it vary across layers.
     compression_module = FeatureCompressorDecompressor(
                             feature_dim = feature_dim,
                             comp_ratio = comp_ratio
                         )
+
 ..
