@@ -80,8 +80,7 @@ class ProxyDataView(MutableMapping):
             send_tensors = [value[ind] for ind in self.indices_required_from_me]
             if Config.enable_cr:
                 compressed_send_tensors = self.dist_block.compression_decompression.compress(
-                                                    send_tensors, iter=Config.train_iter, 
-                                                    step=Config.step, enable_vcr=Config.enable_vcr)
+                                                    send_tensors, iter=Config.train_iter)
                 # =====================================================================
                 # Code for MI calculation. This part slows down the training significantly.
                 # So I am commenting it out.

@@ -52,10 +52,42 @@ compression ratio for each layer. This enables the use of different compression 
 ::
 
     feature_dim = [features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels]
-    compression_ratio = [float(args.comp_ratio)] * args.n_layers                               # Using same ratio for every layer but you can change it vary across layers.
+    compression_ratio = [float(args.comp_ratio)] * args.n_layers   # Using same ratio for every layer but you can change it vary across layers.
     compression_module = FeatureCompressorDecompressor(
                             feature_dim = feature_dim,
                             comp_ratio = comp_ratio
                         )
 
 ..
+
+Mode 2: Node-based compression-decompression
+--------------------------------------------------------------------------------
+In this mode (Figure 2b), The sending client (Client1) selects a subset of nodes (Say only two out of a, b, c)
+that it needs to send and the receiving client (Client2) replaces the missing nodes with 0. It consists 
+of a ranking module which ranks the node based on their feature using a one-layer neural network.
+Then it selects a fraction (1 / compression_ratio) of the nodes based on their ranking. The compression ratio can be
+fixed or variable over training iterations. This whole ranking and selection process is similar
+to pooling operator in Graph-UNet (https://github.com/HongyangGao/Graph-U-Nets/blob/master/src/utils/ops.py#L64).
+
+One advantage of this module over feature-based compression is that you can use variable compression ratio during
+training time. For example, you can send fewer nodes during the initial epochs and continuously increase the
+amount as training progresses. One reason you might want to do that is because during initial epoch the 
+node embeddings are noisy and unstable and probably doesn't contain lot of information. However, as you train these
+embeddings becomes more stable and informative. So, it might be benificial to save some bandwith initially and use it
+at later stages.
+
+Use :class:`NodeCompressorDecompressor` for node-based compression. The feature dimension is
+used in the same way as feature-based compression. However, the compression ratio is a single value instead of a list. 
+To enable variable compression ratio across training epochs, use :math:`enable_vcr=True`
+and specifiy the :math:`step`. :math:`step` is the number of epochs after which compression ratio changes based on
+ a exponentially decaying function.
+
+::
+    feature_dim = [features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels]
+    compression_ratio = float(args.comp_ratio)
+    compression_module = NodeCompressorDecompressor(
+                            feature_dim=feature_dim,
+                            comp_ratio=comp_ratio,
+                            step=32,
+                            enable_vcr=True
+                        )

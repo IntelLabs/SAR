@@ -397,7 +397,9 @@ def main():
             elif args.compression_type == "node":
                 comp_mod = NodeCompressorDecompressor(
                         feature_dim=feature_dim,
-                        comp_ratio=args.comp_ratio
+                        comp_ratio=args.comp_ratio,
+                        step=32,
+                        enable_vcr=True
                     )
             elif args.compression_type == "subgraph":
                 comp_mod = SubgraphCompressorDecompressor(

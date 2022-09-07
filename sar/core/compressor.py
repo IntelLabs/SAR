@@ -127,12 +127,16 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
     def __init__(
         self, 
         feature_dim: List[int],
-        comp_ratio: float):
+        comp_ratio: float,
+        step: int,
+        enable_vcr: bool):
         
         super().__init__()
         self.feature_dim = feature_dim
         self.scorer = nn.ModuleDict()
         self.comp_ratio = comp_ratio
+        self.step = step
+        self.enable_vcr = enable_vcr
         for i, f in enumerate(feature_dim):
             self.scorer[f"layer_{i}"] = nn.Sequential(
                 nn.Linear(f, 1),
@@ -143,8 +147,6 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
         self, 
         tensors_l: List[Tensor],
         iter: int = 0,
-        step: int = 32,
-        enable_vcr: str = False,
         scorer_type: str = "learnable"):
         """
         Take a list of tensors and return a list of compressed tensors
@@ -168,8 +170,8 @@ class NodeCompressorDecompressor(CompressorDecompressorBase):
         sel_indices = []
 
         # Compute compression ratio
-        if enable_vcr:
-            comp_ratio = compute_CR_exp(step, iter)
+        if self.enable_vcr:
+            comp_ratio = compute_CR_exp(self.step, iter)
         else:
             assert self.comp_ratio is not None, \
                 "Compression ratio can't be None for fixed compression ratio"
@@ -247,6 +249,8 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
     def __init__(
         self,
         feature_dim: List[int],
+        step: int,
+        enable_vcr: bool,
         full_local_graph,
         indices_required_from_me: List[Tensor],
         tgt_node_range: Tuple[int, int],
@@ -256,6 +260,8 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         self.full_local_graph = full_local_graph
         self.tgt_node_range = tgt_node_range
         self.comp_ratio = comp_ratio
+        self.step = step
+        self.enable_vcr = enable_vcr
 
         # Create learnable modules
         self.pack = nn.ModuleDict()     # GCN module to aggregate information
@@ -328,8 +334,6 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
         self, 
         tensors_l: List[Tensor],
         iter: int = 0,
-        step: int = 32,
-        enable_vcr=False,
         scorer_type=None):
         """
         Take a list of tensors and return a list of compressed tensors
@@ -348,8 +352,8 @@ class SubgraphCompressorDecompressor(CompressorDecompressorBase):
 
         compressed_tensors_l = []
         sel_indices = []
-        if enable_vcr:
-            comp_ratio = compute_CR_exp(step, iter)
+        if self.enable_vcr:
+            comp_ratio = compute_CR_exp(self.step, iter)
         else:
             assert self.comp_ratio is not None, \
                 "Compression ratio can't be None for fixed compression ratio"
