@@ -22,6 +22,6 @@ Mode 1: Feature-based compression-decompression
 In this mode, SAR uses an autoencoder architecture to learn a latent embedding for the sending nodes (a, b, c) with size determined by the compression ratio. The encoder (compressor) projects each node feature vector to 
 the latent space and the decoder (decompressor) projects it back to the original size.
 
-.. image:: ./images/feature_based_comp_decomp.png
+.. image:: ./images/comp_decomp_feat_node.png
     :alt: SAR compression-decompression
-    :width: 600 px
+    :width: 1000 px
