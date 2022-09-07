@@ -6,4 +6,4 @@ SAR can reduce the communication overhead of distributed GNN training during rem
 
 .. image:: ./images/comp_decomp_overview.png
     :alt: SAR compression-decompression
-    :width: 500 px
+    :width: 1000 px
