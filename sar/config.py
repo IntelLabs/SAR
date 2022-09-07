@@ -59,6 +59,4 @@ class Config(object):
     compression_type: str = None
     mi_leak = []
     entropy: float = 0
-    step: int = 32
     enable_cr: bool = False
-    enable_vcr: bool = False
