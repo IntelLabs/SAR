@@ -68,7 +68,7 @@ class FeatureCompressorDecompressor(CompressorDecompressorBase):
                 nn.Linear(k, f)
             )
     
-    def compress(self, tensors_l: List[Tensor], iter: int = 0, enable_vcr=None, scorer_type=None):
+    def compress(self, tensors_l: List[Tensor], iter: int = 0, scorer_type=None):
         '''
         Take a list of tensors and return a list of compressed tensors
 

@@ -407,7 +407,9 @@ def main():
                         full_local_graph=full_graph_manager,
                         indices_required_from_me=indices_required_from_me,
                         tgt_node_range=tgt_node_range,
-                        comp_ratio=args.comp_ratio
+                        comp_ratio=args.comp_ratio,
+                        step=32,
+                        enable_vcr=True
                 )
             else:
                 raise NotImplementedError("Undefined compression_type." 
