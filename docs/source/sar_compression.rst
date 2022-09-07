@@ -19,8 +19,8 @@ There are three different modes for compression-decompression:
 
 Mode 1: Feature-based compression-decompression
 ------------------------------------------------------------------------------
-In this mode (Figure 2a), SAR uses an autoencoder architecture to learn a latent embedding for the sending nodes (a, b, c) with size determined by the compression ratio. The encoder (compressor) projects each node feature vector (size :math: `F`) to 
-the latent space (size :math: `F'`) and the decoder (decompressor) projects it back to the original size.
+In this mode (Figure 2a), SAR uses an autoencoder architecture to learn a latent embedding for the sending nodes (a, b, c) with size determined by the compression ratio. The encoder (compressor) projects each node feature vector (size :math:`F`) to 
+the latent space (size :math:`F'`) and the decoder (decompressor) projects it back to the original size.
 
 .. image:: ./images/comp_decomp_feat_node.png
     :alt: SAR compression-decompression
