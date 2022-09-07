@@ -82,6 +82,7 @@ To enable variable compression ratio across training epochs, use :math:`enable_v
 and specifiy the :math:`step`. :math:`step` is the number of epochs after which compression ratio changes based on a exponentially decaying function.
 
 ::
+    
     feature_dim = [features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels]
     compression_ratio = float(args.comp_ratio)
     compression_module = NodeCompressorDecompressor(
