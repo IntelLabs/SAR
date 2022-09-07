@@ -2,16 +2,16 @@ N_CLIENTS = 10
 ROUND = 1
 cmd_fcr = []
 cmd_vcr = []
-COMP_TYPE = "subgraph"
+COMP_TYPE = "feature"
 
-TRAIN_ITER = 512
+TRAIN_ITER = 64
 COMP_RATIO = 4
 STEP = TRAIN_ITER // COMP_RATIO
 
 LOG_DIR_FCR = f"log/fixed_cr/{COMP_TYPE}/CR={COMP_RATIO}/K={ROUND}"
 LOG_DIR_VCR = f"log/varying_cr/{COMP_TYPE}/CR={TRAIN_ITER//STEP}/K={ROUND}"
-EXP = "vcr"
-TRIALS = 2
+EXP = "fcr"
+TRIALS = 1
 for t in range(TRIALS):
     LOG_DIR_FCR = f"log/fixed_cr/{COMP_TYPE}/CR={COMP_RATIO}/K={ROUND}/TRIAL={t}"
     LOG_DIR_VCR = f"log/varying_cr/{COMP_TYPE}/CR={TRAIN_ITER//STEP}/K={ROUND}"
