@@ -82,7 +82,7 @@ To enable variable compression ratio across training epochs, use :math:`enable_v
 and specifiy the :math:`step`. :math:`step` is the number of epochs after which compression ratio changes based on a exponentially decaying function.
 
 ::
-    
+
     feature_dim = [features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels]
     compression_ratio = float(args.comp_ratio)
     compression_module = NodeCompressorDecompressor(
@@ -91,3 +91,35 @@ and specifiy the :math:`step`. :math:`step` is the number of epochs after which 
                             step=32,
                             enable_vcr=True
                         )
+
+..
+
+Mode 3: Subgraph-based compression-decompression
+------------------------------------------------------------------
+This mode is similar to node-based compression expect that it has learnable compressor module. 
+This compressor first passes the node features through a GNN using the induced subgraph of the sending nodes (a, b, c). Then it uses a ranking module to pool a subset of node representation 
+and sends them. The advantage of this module over node-based is that this is better in terms of privacy since it aggregates
+the node-features to learn a sub-graph representation instead of directly sharing these nodes.
+Note that this operation is only applied to the first layer processing of GNN since we don't share direct node features in the subsequent layers.
+So for the subsequent layers this works as a node-based compressor.
+
+Upon receiving, the remote client (Client2) diffuses these representation using the same induced subgraph structure to interpolate the missing node-features.
+Note that in node-based compressor, we don't do anything for the missing nodes (we just replace them by 0). Instead here, we are
+interpolating these missing features by applying max-pool operation across the neighbors of a particular node.
+
+The improved compression and decompressor scheme helps this module to gain similar performance as feature-based
+compressor while having more privacy benefit compared to feature-based. Use :class:`SubgraphCompressorDecompressor`
+for subgraph-based compression.
+
+::
+
+    feature_dim = [features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels]
+    compression_ratio = float(args.comp_ratio)
+    compression_module = SubgraphCompressorDecompressor(
+                        feature_dim=feature_dim,
+                        full_local_graph=one_shot_graph,
+                        indices_required_from_me=one_shot_graph.indices_required_from_me,
+                        tgt_node_range=one_shot_graph.tgt_node_range,
+                        comp_ratio=args.comp_ratio
+                )
+..
