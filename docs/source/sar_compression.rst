@@ -42,7 +42,7 @@ In this mode (Figure 2a), SAR uses an autoencoder architecture to learn a latent
 the latent space (size :math:`F'`) and the decoder (decompressor) projects it back to the original size.
 
 .. image:: ./images/comp_decomp_feat_node.png
-    :alt: SAR compression-decompression
+    :alt: Feature and Node compression-decompression
     :width: 1000 px
 
 Use :class:`sar.core.compressor.FeatureCompressorDecompressor` with the original feature dimension (:math:`F`) the desired compression ratio (:math:`F/F'`).
@@ -106,6 +106,11 @@ So for the subsequent layers this works as a node-based compressor.
 Upon receiving, the remote client (Client2) diffuses these representation using the same induced subgraph structure to interpolate the missing node-features.
 Note that in node-based compressor, we don't do anything for the missing nodes (we just replace them by 0). Instead here, we are
 interpolating these missing features by applying max-pool operation across the neighbors of a particular node.
+
+.. image:: ./images/comp_decomp_subgraph.png
+    :alt: Subgraph compression-decompression
+    :width: 1000 px
+
 
 The improved compression and decompressor scheme helps this module to gain similar performance as feature-based
 compressor while having more privacy benefit compared to feature-based. Use :class:`SubgraphCompressorDecompressor`
