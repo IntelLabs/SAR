@@ -96,7 +96,7 @@ and specifiy the :math:`step`. :math:`step` is the number of epochs after which 
 
 Mode 3: Subgraph-based compression-decompression
 ------------------------------------------------------------------
-This mode is similar to node-based compression expect that it has learnable compressor module. 
+This mode is similar to the node-based compression expect that it has learnable compressor module and a smarter decompression module. 
 This compressor first passes the node features through a GNN using the induced subgraph of the sending nodes (a, b, c). Then it uses a ranking module to pool a subset of node representation 
 and sends them. The advantage of this module over node-based is that this is better in terms of privacy since it aggregates
 the node-features to learn a sub-graph representation instead of directly sharing these nodes.
