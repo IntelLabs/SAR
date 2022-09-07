@@ -2,7 +2,7 @@ N_CLIENTS = 10
 ROUND = 1
 cmd_fcr = []
 cmd_vcr = []
-COMP_TYPE = "node"
+COMP_TYPE = "subgraph"
 
 TRAIN_ITER = 512
 COMP_RATIO = 4
