@@ -23,8 +23,8 @@ then attach a compression decompression module to it.
   )
   shard_manager = sar.construct_full_graph(partition_data)
   one_shot_graph = shard_manager.get_full_partition_graph()
-  compression_module = ...   # define compression module here
-  one_shot_graph._compression_decompression = compression_module
+  compression_module = ...                                         # define compression module here
+  one_shot_graph._compression_decompression = compression_module   # attach compression module with one shot graph
   model_out = gnn_model(one_shot_graph, local_node_features)
   loss_function(model_out).backward()
 
