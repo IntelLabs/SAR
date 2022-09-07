@@ -22,8 +22,8 @@ then attach a compression decompression module to it.
      device #Device to place the partition data (CPU or GPU)
   )
   shard_manager = sar.construct_full_graph(partition_data)
-  one_shot_graph = shard_manager.get_full_partition_graph()
-  compression_module = ...                                         # define compression module here
+  one_shot_graph = shard_manager.get_full_partition_graph()        # extract one-shot graph
+  compression_module = ...                                         # define compression module here (3 possible options)
   one_shot_graph._compression_decompression = compression_module   # attach compression module with one shot graph
   model_out = gnn_model(one_shot_graph, local_node_features)
   loss_function(model_out).backward()
@@ -45,3 +45,15 @@ the latent space (size :math:`F'`) and the decoder (decompressor) projects it ba
     :alt: SAR compression-decompression
     :width: 1000 px
 
+Use :class:`sar.core.compressor.FeatureCompressorDecompressor` with the original feature dimension (:math:`F`) the desired compression ratio (:math:`F/F'`).
+The original feature is a list of integers corresponding to input dimension of each layer of GNN. Similary, the compression ratio is also a list corresponding to 
+compression ratio for each layer. This enables the use of different compression ratio for different layers.
+
+::
+    feature_dim = [features.size(1)] + [args.layer_dim] * (args.n_layers - 2) + [num_labels]
+    compression_ratio = [float(args.comp_ratio)] * args.n_layers                               # Using same ratio for every layer but you can change it vary across layers.
+    compression_module = FeatureCompressorDecompressor(
+                            feature_dim = feature_dim,
+                            comp_ratio = comp_ratio
+                        )
+..
