@@ -11,6 +11,25 @@ learnable compression module and decompress it on the Client2 side using a learn
     :alt: SAR compression-decompression
     :width: 1000 px
 
+Currently, the compression-decompression module is implemented only for :ref:`One-shot aggregation` mode. 
+So you should first extract the full partition graph from the :class:`sar.core.GraphShardManager` object and 
+then attach a compression decompression module to it.
+::
+
+  partition_data = sar.load_dgl_partition_data(
+     json_file_path, #Path to .json file created by DGL's partition_graph
+     rank, #Worker rank
+     device #Device to place the partition data (CPU or GPU)
+  )
+  shard_manager = sar.construct_full_graph(partition_data)
+  one_shot_graph = shard_manager.get_full_partition_graph()
+  compression_module = ...   # define compression module here
+  one_shot_graph._compression_decompression = compression_module
+  model_out = gnn_model(one_shot_graph, local_node_features)
+  loss_function(model_out).backward()
+
+..
+
 There are three different modes for compression-decompression:
 
 .. contents:: :local:
@@ -25,3 +44,4 @@ the latent space (size :math:`F'`) and the decoder (decompressor) projects it ba
 .. image:: ./images/comp_decomp_feat_node.png
     :alt: SAR compression-decompression
     :width: 1000 px
+
