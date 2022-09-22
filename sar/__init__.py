@@ -24,8 +24,9 @@ Top-level SAR package
 '''
 
 from .comm import initialize_comms, rank, world_size, comm_device,\
-    nfs_ip_init,sync_params,gather_grads
-from .core import GraphShardManager, message_has_parameters, DistributedBlock
+    nfs_ip_init, sync_params, gather_grads
+from .core import GraphShardManager, message_has_parameters, DistributedBlock,\
+    DistNeighborSampler, DataLoader
 from .construct_shard_manager import construct_mfgs, construct_full_graph
 from .data_loading import load_dgl_partition_data, suffix_key_lookup
 from .distributed_bn import DistributedBN1D
@@ -39,5 +40,5 @@ __all__ = ['initialize_comms', 'rank', 'world_size', 'nfs_ip_init',
            'comm_device', 'DistributedBN1D',
            'construct_mfgs', 'construct_full_graph', 'GraphShardManager',
            'load_dgl_partition_data', 'suffix_key_lookup', 'Config', 'edge_softmax',
-           'message_has_parameters', 'DistributedBlock',
-           'logging_setup', 'logger','sync_params','gather_grads','patch_dgl']
+           'message_has_parameters', 'DistributedBlock', 'DistNeighborSampler', 'DataLoader',
+           'logging_setup', 'logger', 'sync_params', 'gather_grads', 'patch_dgl']
