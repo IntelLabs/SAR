@@ -26,6 +26,7 @@ in a single worker)
 
 from typing import Tuple, Dict, List,  Optional
 import inspect
+import os
 import itertools
 import logging
 from collections.abc import MutableMapping
@@ -230,6 +231,8 @@ class GraphShardManager:
         self.srcdata = ChainedDataView(self.num_src_nodes())
         self.edata = ChainedDataView(self.num_edges())
 
+        self._sampling_graph = None
+
     @ property
     def tgt_node_range(self) -> Tuple[int, int]:
         return self.graph_shards[0].tgt_range
@@ -237,6 +240,48 @@ class GraphShardManager:
     @ property
     def local_src_node_range(self) -> Tuple[int, int]:
         return self.graph_shards[rank()].src_range
+
+    @property
+    def node_ranges(self) -> List[Tuple[int, int]]:
+        return [g_shard.src_range for g_shard in self.graph_shards]
+
+    @property
+    def sampling_graph(self):
+        """
+        Returns a non-compacted graph for sampling. The node ids in the returned
+        graph are the same as their global ids. Message passing on the sampling_graph
+        will be very memory-inefficient as the node feature tensor will have to include
+        a feature vector for each node in the whole graph
+
+        """
+        if self._sampling_graph is not None:
+            return self._sampling_graph
+
+        global_src_nodes = []
+        global_tgt_nodes = []
+        for shard in self.graph_shards:
+            global_src_nodes.append(
+                shard.unique_src_nodes[shard.graph.all_edges()[0]])
+            global_tgt_nodes.append(
+                shard.unique_tgt_nodes[shard.graph.all_edges()[1]])
+
+        # We only need the csc format for sampling
+        sampling_graph = dgl.graph((torch.cat(global_src_nodes),
+                                    torch.cat(global_tgt_nodes)),
+                                   num_nodes=self.graph_shards[-1].src_range[1]).shared_memory(
+                                       'sample_graph'+repr(os.getpid()), formats=['csc'])
+        del global_src_nodes, global_tgt_nodes
+
+        edge_feat_dict: Dict[str, Tensor] = {}
+        for edge_feat_key in self.graph_shards[0].graph.edata:
+            edge_feat_dict[edge_feat_key] = \
+                torch.cat([g_shard.graph.edata[edge_feat_key]
+                           for g_shard in self.graph_shards]).share_memory_()
+
+        sampling_graph.edata.update(edge_feat_dict)
+
+        self._sampling_graph = sampling_graph
+        return sampling_graph
 
     def update_boundary_nodes_indices(self) -> List[Tensor]:
         all_my_sources_indices = [

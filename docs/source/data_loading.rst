@@ -3,12 +3,15 @@
 
 Data loading and graph construction
 ==========================================================
-After partitioning the graph using DGL's `partition_graph <https://docs.dgl.ai/en/0.6.x/generated/dgl.distributed.partition.partition_graph.html>`_ function, SAR can load the graph data using :func:`sar.load_dgl_partition_data`. This yields a :class:`sar.common_tuples.PartitionData` object. The ``PartitionData`` object can then be used to construct various types of graph-like objects that can be passed to GNN models. The graph construction options are described below: 
+After partitioning the graph using DGL's `partition_graph <https://docs.dgl.ai/en/0.6.x/generated/dgl.distributed.partition.partition_graph.html>`_ function, SAR can load the graph data using :func:`sar.load_dgl_partition_data`. This yields a :class:`sar.common_tuples.PartitionData` object. The ``PartitionData`` object can then be used to construct various types of graph-like objects that can be passed to GNN models. You can construct graph objects to use for distributed full-batch training or graph objects to use for distributed training as follows: 
 
 .. contents:: :local:
-    :depth: 2
+    :depth: 3
 
-
+	    
+Full-batch training
+---------------------------------------------------------------------------------------
+	    
 Constructing the full graph for sequential aggregation and rematerialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Construct a single distributed graph object of type :class:`sar.core.GraphShardManager`::
@@ -53,7 +56,7 @@ Using message flow graphs at each layer can substantially lower run-time and mem
 
 Constructing full graph or MFGs for one-shot aggregation 
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-As described in the the :ref:`training modes <sar-modes>`, SAR supports doing one-shot distributed aggregation (mode 3). To run in this mode, you should extract the full partition graph from the :class:`sar.core.GraphShardManager` object and use that during training. When using the full graph:
+As described in :ref:`training modes <sar-modes>`, SAR supports doing one-shot distributed aggregation (mode 3). To run in this mode, you should extract the full partition graph from the :class:`sar.core.GraphShardManager` object and use that during training. When using the full graph:
 ::
 
     shard_manager = sar.construct_full_graph(partition_data)
@@ -74,21 +77,51 @@ When using MFGs:
     ## Use one_shot_blocks from now on
 
 ..
- 
+
+
+Sampling-based training
+---------------------------------------------------------------------------------------
+
+For sampling-based training, use the dataloader provided by SAR: :func:`sar.DataLoader` to construct globally-sampled graphs. The sampled graphs are vanilla DGL graphs that reside solely on the local machines. SAR provides a global neighbor sampler: :class:`sar.DistNeighborSampler` that defines the sampling process from the distributed graph. A typical use case is:
+
+::
+
+   shard_manager = sar.construct_full_graph(partition_data)   
+
+   neighbor_sampler = sar.DistNeighborSampler(
+   [15, 10, 5], #Fanout for every layer
+   input_node_features={'features': features}, #Input features to add to srcdata of first layer's sampled block
+   output_node_features={'labels': labels} #Output features to add to dstdata of last layer's sampled block
+   )
+
+   dataloader = sar.DataLoader(
+        shard_manager, #Distributed graph
+        train_nodes, #Global indices of nodes that will form the root of the sampled graphs. In node classification, these are the labeled nodes
+        neighbor_sampler, #Distributed sampler
+        batch_size)
+
+   for blocks in dataloader:
+        output = gnn_model(blocks)
+	...
+		
+..		
+
     
    
 Relevant methods
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+---------------------------------------------------------------------------------------
 
 .. currentmodule:: sar
 
 
 .. autosummary::
    :toctree: Data loading and graph construction
+   :template: distneighborsampler
 	     
 
    load_dgl_partition_data	      
    construct_full_graph
    construct_mfgs   
-
+   DataLoader
+   DistNeighborSampler
 	     

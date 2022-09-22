@@ -2,7 +2,7 @@
 
 Quick start guide
 ===============================
-Follow the following steps to enable distributed full-batch training in your DGL code:
+Follow the following steps to enable distributed training in your DGL code:
 
 .. contents::
     :depth: 2
@@ -74,9 +74,8 @@ Load partition data and construct graph
 -----------------------------------------------------------------
 Use :func:`sar.load_dgl_partition_data` to load one graph partition from DGL's partition data in each worker. :func:`sar.load_dgl_partition_data` returns a :class:`sar.common_tuples.PartitionData` object that contains all the information about the partition.
 
-There are several ways to construct a distributed graph-like object from ``PartitionData``. See :ref:`constructing distributed graphs <data-loading>` for more details. Here we will use the simplest method:  :func:`sar.construct_full_graph` which returns a :class:`sar.GraphShardManager` object which implements many of the GNN-related functionality of DGL's native graph objects. ``GraphShardManager`` can thus be used as a drop-in replacement for DGL's native graphs.
+There are several ways to construct a distributed graph-like object from ``PartitionData``. See :ref:`constructing distributed graphs <data-loading>` for more details. Here we will use the simplest method:  :func:`sar.construct_full_graph` which returns a :class:`sar.core.GraphShardManager` object which implements many of the GNN-related functionality of DGL's native graph objects. ``GraphShardManager`` can thus be used as a drop-in replacement for DGL's native graphs or it can be passed to SAR's samplers and data loaders to construct graph mini-batches.
 
-Putting it all together:
 ::
    
     partition_data = sar.load_dgl_partition_data(
@@ -88,12 +87,9 @@ Putting it all together:
     
 .. 
 
-
-Synchronize parameters and gradients
+Full-batch training
 ---------------------------------------------------------------------------
-In a distributed setting, each worker will construct the GNN model. Before training, we should synchronize the model parameters across all workers. :func:`sar.sync_params` is a convenience function that does just that. At the end of every training iteration, each worker needs to gather and sum the parameter gradients from all other workers before making the parameter update. This can be done using :func:`sar.gather_grads`.
-
-Model initialization and the training loop follow the following recipe: ::
+Full-batch training using SAR follows a very similar pattern as single-host training. Instead of using a vanilla DGL graph, we use a :class:`sar.core.GraphShardManager`. After initializing the communication backend, loading graph data and constructing the distributed graph, a simple training loop is  ::
 
   gnn_model = construct_GNN_model(...)
   optimizer = torch.optim.Adam(gnn_model.parameters(),..)
@@ -107,5 +103,41 @@ Model initialization and the training loop follow the following recipe: ::
      optimizer.step()
 
 ..
+
+In a distributed setting, each worker will construct the GNN model. Before training, we should synchronize the model parameters across all workers. :func:`sar.sync_params` is a convenience function that does just that. At the end of every training iteration, each worker needs to gather and sum the parameter gradients from all other workers before making the parameter update. This can be done using :func:`sar.gather_grads`.
+
+See :ref:`training modes <sar-modes>` for the different full-batch training modes.
+
+Sampling-based or mini-batch training
+---------------------------------------------------------------------------
+A simple sampling-based training loop looks as follows:
+      
+::
+
+   neighbor_sampler = sar.DistNeighborSampler(
+   [15, 10, 5], #Fanout for every layer
+   input_node_features={'features': features}, #Input features to add to srcdata of first layer's sampled block
+   output_node_features={'labels': labels} #Output features to add to dstdata of last layer's sampled block
+   )
+
+   dataloader = sar.DataLoader(
+        shard_manager, #Distributed graph
+        train_nodes, #Global indices of nodes that will form the root of the sampled graphs. In node classification, these are the labeled nodes
+        neighbor_sampler, #Distributed sampler
+        batch_size)
+
+   for blocks in dataloader:
+     output = gnn_model(blocks)
+     loss = calculate_loss(output,labels)
+     optimizer.zero_grad()
+     loss.backward()
+     sar.gather_grads(gnn_model)
+     optimizer.step()
+
+..		
+
+
+We use :class:`sar.DistNeighborSampler` to construct a distributed sampler and :func:`sar.DataLoader` to construct an iterator that retrurn standard local DGL blocks constructed from the distributed graph.  
+
 
 For complete examples, check the examples folder in the Git repository.
