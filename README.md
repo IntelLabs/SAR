@@ -26,7 +26,7 @@ The run-time of SAR improves as we add more machines. At 128 machines, the epoch
 
 
 ## Sampling-based training Performance on ogbn-papers100M
-SAR  is considerably faster than DistDGL in sampling-based training on CPUs.  Each machine is a 2-socket machine with 2 Icelake processors (36 cores each). The machines are connected using Infiniband HDR (200 Gbps) links.  We benchmarked using  3-layer GraphSage network with hidden layer size of 256.
+SAR  is considerably faster than DistDGL in sampling-based training on CPUs.  Each machine is a 2-socket machine with 2 Icelake processors (36 cores each). The machines are connected using Infiniband HDR (200 Gbps) links.  We benchmarked using  3-layer GraphSage network with hidden layer size of 256. We used a batch size of 1000 per machine.
 
 <img src="docs/source/images/sar_vs_distdgl.png" width="400">  
 
