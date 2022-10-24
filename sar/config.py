@@ -52,3 +52,11 @@ class Config(object):
     disable_sr: bool = False
     max_collective_size: int = 0
     pipeline_depth: int = 1
+    current_layer_index: int = 0
+    total_layers: int = None
+    train_iter: int = 0
+    total_train_iter: int = 0
+    compression_type: str = None
+    mi_leak = []
+    entropy: float = 0
+    enable_cr: bool = False

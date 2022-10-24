@@ -112,8 +112,7 @@ class GraphShard:
         if self._graph_reverse is None:
             edges_src, edges_tgt = self.graph.all_edges()
             self._graph_reverse = dgl.create_block((edges_tgt, edges_src),
-                                                   num_src_nodes=self.unique_tgt_nodes.size(
-                                                       0),
+                                                   num_src_nodes=self.unique_tgt_nodes.size(0),
                                                    num_dst_nodes=self.unique_src_nodes.size(0))
             self._graph_reverse.edata.update(self.graph.edata)
         return self._graph_reverse
@@ -221,8 +220,7 @@ class GraphShardManager:
             0) == self.tgt_node_range[1] - self.tgt_node_range[0]
 
         self.indices_required_from_me = self.update_boundary_nodes_indices()
-        self.sizes_expected_from_others = [
-            shard.unique_src_nodes.size(0) for shard in self.graph_shards]
+        self.sizes_expected_from_others = [shard.unique_src_nodes.size(0) for shard in self.graph_shards]
 
         self.in_degrees_cache: Dict[Optional[str], Tensor] = {}
         self.out_degrees_cache: Dict[Optional[str], Tensor] = {}

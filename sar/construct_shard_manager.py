@@ -183,6 +183,7 @@ def construct_mfgs(partition_data: PartitionData,
     return graph_shard_manager_list[::-1]
 
 
+
 def construct_full_graph(partition_data: PartitionData) -> GraphShardManager:
     """
     Constructs a GraphShardManager object from the partition data. The GraphShardManager
