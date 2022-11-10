@@ -21,6 +21,7 @@
 from cgitb import enable
 from typing import List, Dict, Optional, Tuple
 import logging
+import time
 from collections.abc import MutableMapping
 import torch
 import torch.nn as nn
@@ -28,10 +29,10 @@ import dgl  # type: ignore
 from torch import Tensor
 import torch.distributed as dist
 from torch.autograd import profiler
-from sklearn.feature_selection import mutual_info_regression
+#from sklearn.feature_selection import mutual_info_regression
 import numpy as np
 
-from sar.comm import exchange_tensors
+from sar.comm import exchange_tensors, all_to_all
 from sar.core.compressor import CompressorDecompressorBase
 
 from ..comm import world_size, rank, all_reduce
@@ -50,9 +51,11 @@ def compute_MI(X, Y):
     """
     mi = 0
     for i in range(X.shape[1]):
-        val = mutual_info_regression(X[:, i][:, np.newaxis], Y[:, i], random_state=42)
+        val = mutual_info_regression(
+            X[:, i][:, np.newaxis], Y[:, i], random_state=42)
         mi += val.sum()
     return mi
+
 
 class ProxyDataView(MutableMapping):
     """A distributed dictionary"""
@@ -77,64 +80,37 @@ class ProxyDataView(MutableMapping):
 
         with profiler.record_function("COMM_FETCH"):
             logger.debug(f'compression decompression: {rank()}')
-            send_tensors = [value[ind] for ind in self.indices_required_from_me]
+            send_tensors = [(value[ind] if worker_idx != rank() else value[[]])
+                            for worker_idx, ind in enumerate(self.indices_required_from_me)]
+            corrected_sizes_expected_from_others = self.sizes_expected_from_others[:]
+            corrected_sizes_expected_from_others[rank()] = 0
+
             if Config.enable_cr:
                 compressed_send_tensors = self.dist_block.compression_decompression.compress(
-                                                    send_tensors, iter=Config.train_iter)
-                # =====================================================================
-                # Code for MI calculation. This part slows down the training significantly.
-                # So I am commenting it out.
-                # first decompress locally
-                # Compute mutual information for each feature dimension individually and
-                # average them. Sum them up over iterations.
-                # if Config.current_layer_index == 0 and Config.train_iter % 2 == 0:
-                #     X = [value[ind] for ind in self.indices_required_from_me]
-                #     with torch.no_grad():
-                #         # Decompress locally
-                #         if type(compressed_send_tensors) is tuple:
-                #             # subgraph based
-                #             sizes = [len(ind) for ind in self.indices_required_from_me]
-                #             Y = list(compressed_send_tensors)
-                #             Y.append(sizes)
-                #             Y = self.dist_block.compression_decompression.decompress(tuple(Y))
-                #         else:
-                #             # feature based
-                #             Y = self.dist_block.compression_decompression.decompress(compressed_send_tensors)
-                #     total_mi = 0
-                #     for i in range(0, len(X)):
-                #         if i == rank():
-                #             continue
-                #         total_mi += compute_MI(X[i].detach().cpu().numpy(), Y[i].detach().cpu().numpy())
-                    
-                #     if Config.train_iter == 0:
-                #         total_ent = 0
-                #         for i, x in enumerate(X):
-                #             if i == rank():
-                #                 continue
-                #             total_ent += compute_MI(x.detach().cpu().numpy(), x.detach().cpu().numpy())
-                #         Config.entropy += total_ent
-                #         print(f"Entropy: {Config.entropy}")
-                    
-                #     total_mi /= Config.entropy
-                #     Config.mi_leak.append(total_mi)
-                #     print(f"current_leak: {total_mi}, total_leak: {sum(Config.mi_leak)}")
-                # ==========================================================================
+                    send_tensors, iter=Config.train_iter)
 
-                if type(compressed_send_tensors) is tuple:
-                    compressed_recv_tensors = []
-                    for i in range(len(compressed_send_tensors)):
-                        compressed_recv_tensors.append(
-                            list(simple_exchange_op(*compressed_send_tensors[i])))
-                    compressed_recv_tensors.append(self.sizes_expected_from_others)
-                    compressed_recv_tensors = tuple(compressed_recv_tensors)
-                else:
-                    compressed_recv_tensors = simple_exchange_op(*compressed_send_tensors)
-                recv_tensors = self.dist_block.compression_decompression.decompress(compressed_recv_tensors)
-                recv_tensors[rank()] = value[self.indices_required_from_me[rank()]]
+                #t1 = time.time()
+                compressed_recv_tensors = simple_exchange_op(corrected_sizes_expected_from_others,
+                                                             *compressed_send_tensors)
+                #comm_time = time.time() - t1
+                # print(f'simple exchange tensors with sizes \
+                # {compressed_send_tensors[0].size()} in {comm_time}', flush=True)
+                recv_tensors = self.dist_block.compression_decompression.decompress(
+                    compressed_recv_tensors)
             else:
-                recv_tensors = simple_exchange_op(*send_tensors)
-            exchange_result = torch.cat(recv_tensors, dim=-2)
-        
+                #t1 = time.time()
+                recv_tensors = simple_exchange_op(
+                    corrected_sizes_expected_from_others, *send_tensors)
+                #comm_time = time.time() - t1
+                # print(f'simple exchange tensors with sizes \
+                # {send_tensors[0].size()} in {comm_time}', flush=True)
+
+            recv_tensors = list(recv_tensors)
+            recv_tensors[rank()
+                         ] = value[self.indices_required_from_me[rank()]]
+
+            exchange_result = torch.cat(recv_tensors, dim=0)
+
         logger.debug(f'exchange_result {exchange_result.size()}')
 
         self.base_dict[key] = exchange_result
@@ -200,12 +176,12 @@ class DistributedBlock:
         self.seeds = seeds
 
         self.srcdata = ProxyDataView(self, input_nodes.size(0),
-                                     block.srcdata, indices_required_from_me, 
+                                     block.srcdata, indices_required_from_me,
                                      sizes_expected_from_others)
 
         self.out_degrees_cache: Dict[Optional[str], Tensor] = {}
         self._compression_decompression: CompressorDecompressorBase = None
-    
+
     @property
     def compression_decompression(self):
         return self._compression_decompression
@@ -217,19 +193,23 @@ class DistributedBlock:
     def out_degrees(self, vertices=dgl.ALL, etype=None) -> Tensor:
         if etype not in self.out_degrees_cache:
             src_out_degrees = self._block.out_degrees(etype=etype)
-            src_out_degrees_split = torch.split(src_out_degrees, self.sizes_expected_from_others)
+            src_out_degrees_split = torch.split(
+                src_out_degrees, self.sizes_expected_from_others)
 
             for comm_round in range(world_size()):
                 out_degrees = torch.zeros(
-                    self.src_ranges[comm_round][1] - self.src_ranges[comm_round][0],
+                    self.src_ranges[comm_round][1] -
+                    self.src_ranges[comm_round][0],
                     dtype=self._block.idtype).to(self._block.device)
 
                 out_degrees[self.unique_src_nodes[comm_round] - self.src_ranges[comm_round][0]
                             ] = src_out_degrees_split[comm_round]
-                all_reduce(out_degrees, op=dist.ReduceOp.SUM, move_to_comm_device=True)
+                all_reduce(out_degrees, op=dist.ReduceOp.SUM,
+                           move_to_comm_device=True)
                 if comm_round == rank():
                     out_degrees[out_degrees == 0] = 1
-                    self.out_degrees_cache[etype] = out_degrees.to(self._block.device)
+                    self.out_degrees_cache[etype] = out_degrees.to(
+                        self._block.device)
 
         if vertices == dgl.ALL:
             return self.out_degrees_cache[etype]
@@ -248,74 +228,28 @@ class DistributedBlock:
 class SimpleExchangeOp(torch.autograd.Function):  # pylint: disable = abstract-method
     @ staticmethod
     # pylint: disable = arguments-differ,unused-argument
-    def forward(ctx, *send_tensors) -> Tuple[Tensor, ...]:  # type: ignore
+    # type: ignore
+    def forward(ctx, sizes_expected_from_others: Tensor, *send_tensors) -> Tuple[Tensor, ...]:
+        ctx.sizes_expected_from_others = sizes_expected_from_others
+        ctx.sizes_expected_from_me = [x.size(0) for x in send_tensors]
         send_tensors = [x.detach() for x in send_tensors]
-        recv_tensors = exchange_tensors(list(send_tensors))
+        recv_tensors = [send_tensors[0].new(sz_from_others, *send_tensors[0].size()[1:])
+                        for sz_from_others in sizes_expected_from_others]
+
+        all_to_all(recv_tensors, send_tensors, move_to_comm_device=True)
         return tuple(recv_tensors)
 
     @ staticmethod
     # pylint: disable = arguments-differ
     # type: ignore
-
     def backward(ctx, *grad):
-        send_grad = exchange_tensors(list(grad))
-        return tuple(send_grad)
+        send_tensors = list(grad)
+        recv_tensors = [send_tensors[0].new(sz_from_me, *send_tensors[0].size()[1:])
+                        for sz_from_me in ctx.sizes_expected_from_me]
+
+        all_to_all(recv_tensors, send_tensors, move_to_comm_device=True)
+
+        return tuple([None] + recv_tensors)
 
 
 simple_exchange_op = SimpleExchangeOp.apply
-
-# class TensorExchangeOp(torch.autograd.Function):  # pylint: disable = abstract-method
-#     @ staticmethod
-#     # pylint: disable = arguments-differ,unused-argument
-#     def forward(ctx, val: Tensor, indices_required_from_me: Tensor,  # type: ignore
-#                 sizes_expected_from_others: Tensor, 
-#                 compressors: Union[List[nn.Module], nn.Module],
-#                 decompressors: Union[List[nn.Module], nn.Module],
-#                 channel_type: str) -> Tensor:  # type: ignore
-#         ctx.sizes_expected_from_others = sizes_expected_from_others
-#         ctx.indices_required_from_me = indices_required_from_me
-#         ctx.input_size = val.size()
-
-#         send_tensors = [val[indices] for indices in indices_required_from_me]
-#         if channel_type == "client":
-#             # Client specific compression
-#             send_tensors = [compressors[i](val) if i != rank() else val 
-#                                 for i, val in enumerate(send_tensors)]
-#         elif channel_type == "fixed":
-#             # Send data to each client using same compression module
-#             #TODO: check if i means rank or not
-#             send_tensors = [compressors(val) if i != rank() else val 
-#                                 for i, val in enumerate(send_tensors)]
-        
-#         recv_tensors = [val.new(sz_from_others, *val.size()[1:])
-#                         for sz_from_others in sizes_expected_from_others]
-#         all_to_all(recv_tensors, send_tensors, move_to_comm_device=True)
-
-#         if channel_type == "client":
-#             # Client specific decompression
-#             recv_tensors = [decompressors[i](val) if i != rank() else val 
-#                                 for i, val in enumerate(recv_tensors)]
-#         elif channel_type == "fixed":
-#             # All received features are decompressed using the same module
-#             recv_tensors = [decompressors(val) if i != rank() else val
-#                                 for i, val in enumerate(recv_tensors)]
-        
-#         return torch.cat(recv_tensors)
-
-#     @ staticmethod
-#     # pylint: disable = arguments-differ
-#     # type: ignore
-#     def backward(ctx, grad):
-#         send_tensors = list(torch.split(grad, ctx.sizes_expected_from_others))
-#         recv_tensors = [grad.new(len(indices), *grad.size()[1:])
-#                         for indices in ctx.indices_required_from_me]
-#         all_to_all(recv_tensors, send_tensors, move_to_comm_device=True)
-
-#         input_grad = grad.new(ctx.input_size).zero_()
-#         for r_tensor, indices in zip(recv_tensors, ctx.indices_required_from_me):
-#             input_grad[indices] += r_tensor
-
-#         return input_grad, None, None
-
-
-# tensor_exchange_op = TensorExchangeOp.apply

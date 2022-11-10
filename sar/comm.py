@@ -44,11 +44,14 @@ def get_ip_address(ip_file: str) -> str:
     '''
     Reads ip address from ip_file. Blocks until the file is created
     '''
-    while not os.path.isfile(ip_file):
-        logger.info('waiting for ip file to be created')
-        time.sleep(1)
-    with open(ip_file, 'r', encoding='utf-8') as f_handle:
-        ip_addr = f_handle.readline().strip()
+    while True:
+        while not os.path.isfile(ip_file):
+            logger.info('waiting for ip file to be created')
+            time.sleep(1)
+        with open(ip_file, 'r', encoding='utf-8') as f_handle:
+            ip_addr = f_handle.readline().strip()
+            if ip_addr:
+                break
     logger.info(f'read ip {ip_addr} from file {ip_file}')
     return ip_addr
 
@@ -66,7 +69,8 @@ def get_socket_name() -> str:
     else:
         eth_adapters = [
             x for x in adaps if 'eth' in x.nice_name or 'enp' in x.nice_name]
-        logger.info(f'getting socket name for ethernet adapter: {eth_adapters[0]}')
+        logger.info(
+            f'getting socket name for ethernet adapter: {eth_adapters[0]}')
         sock_name = eth_adapters[0].nice_name
     return sock_name
 
@@ -105,6 +109,9 @@ class _CommData:  # pylint: disable=too-few-public-methods
     comm_device: ClassVar[torch.device]
     rank: ClassVar[int]
     world_size: ClassVar[int]
+    master_ip: str
+    master_port: int
+    backend: str
 
 
 def nfs_ip_init(_rank: int, ip_file: str) -> str:
@@ -126,8 +133,9 @@ def nfs_ip_init(_rank: int, ip_file: str) -> str:
     return master_ip
 
 
-def initialize_comms(_rank: int, _world_size: int, master_ip: str,
-                     backend: str, _comm_device: Optional[torch.device] = None):
+def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
+                     backend: str, _comm_device: Optional[torch.device] = None,
+                     master_port_number: int = 12345):
     """
     Initialize Pytorch's communication library
 
@@ -135,31 +143,38 @@ def initialize_comms(_rank: int, _world_size: int, master_ip: str,
     :type _rank: int
     :param _world_size: Number of workers. The same as the number of graph partitions
     :type _world_size: int
-    :param master_ip: IP address of the master worker (worker with rank 0)
-    :type master_ip: str
+    :param master_ip_address: IP address of the master worker (worker with rank 0)
+    :type master_ip_address: str
     :param backend: Backend to use. Can be ccl, nccl, or mpi
     :type backend: str
     :param _comm_device:  The device on which the tensors should be on in order to transmit them\
     through the backend. If not provided, the device is infered based on the backend type
     :type _comm_device: torch.device
+    :param master_port_number:  The port number on the master
+    :type _comm_device: int
+
 
     """
-    assert backend in ['ccl', 'nccl', 'mpi'], 'backend must be ccl,nccl, or mpi'
+    assert backend in ['ccl', 'nccl',
+                       'mpi'], 'backend must be ccl,nccl, or mpi'
     if _comm_device is None:
         if backend == 'nccl':
             _comm_device = torch.device('cuda')
         else:
             _comm_device = torch.device('cpu')
 
-    if is_initialized():
-        return
+#    if is_initialized():
+ #       return
 
     if backend == 'ccl':
         # pylint: disable=unused-import
-        import torch_ccl  # type: ignore
+        try:
+            import torch_ccl  # type: ignore
+        except ImportError:
+            import oneccl_bindings_for_pytorch
 
-    os.environ['MASTER_ADDR'] = master_ip
-    os.environ['MASTER_PORT'] = '12345'
+    os.environ['MASTER_ADDR'] = master_ip_address
+    os.environ['MASTER_PORT'] = str(master_port_number)
 
     sock_name = get_socket_name()
     os.environ['TP_SOCKET_IFNAME'] = sock_name
@@ -189,8 +204,12 @@ def initialize_comms(_rank: int, _world_size: int, master_ip: str,
     _CommData.world_size = _world_size
     _CommData.comm_device = _comm_device
     _CommData.comm_initialized = True
+    _CommData.master_ip = master_ip_address
+    _CommData.master_port = master_port_number
+    _CommData.backend = backend
 
     logger.info('dist initialized')
+    logger.info('fixed communication')
 
 
 def is_initialized() -> bool:
@@ -216,6 +235,30 @@ def world_size() -> int:
     return _CommData.world_size
 
 
+def master_port() -> int:
+    '''
+    Get the master port of the current distributed setup
+    '''
+    assert is_initialized()
+    return _CommData.master_port
+
+
+def master_ip() -> str:
+    '''
+    Get the master ip address of the current distributed setup
+    '''
+    assert is_initialized()
+    return _CommData.master_ip
+
+
+def backend() -> str:
+    '''
+    Get the backend of the current distributed setup
+    '''
+    assert is_initialized()
+    return _CommData.backend
+
+
 def comm_device() -> torch.device:
     '''
     Gets the preferred device for the current communication
@@ -231,7 +274,10 @@ def all_to_all(recv_tensors: List[torch.Tensor], send_tensors: List[torch.Tensor
     '''
     wrapper around dist.all_to_all
     '''
-    recv_tensors = [x.new(1) if x.numel() == 0 else x for x in recv_tensors]
+    recv_tensors = [x.new(1, *x.size()[1:]) if x.numel()
+                    == 0 else x for x in recv_tensors]
+    send_tensors = [x.new(1, *x.size()[1:]) if x.numel()
+                    == 0 else x for x in send_tensors]
 
     if move_to_comm_device:
         recv_tensors_cd = [recv_tensor.to(comm_device())
@@ -269,13 +315,18 @@ def all_reduce(red_tensor: torch.Tensor, op: dist.ReduceOp,
 
 def all_to_all_rounds(recv_tensors: List[torch.Tensor], send_tensors: List[torch.Tensor]):
     if Config.max_collective_size == 0:
+        #        print(
+        #            f'all to all. recv: {[x.size() for x in recv_tensors]} , send: {[x.size() for x in send_tensors]}', flush=True)
+        #        t1 = time.time()
         dist.all_to_all(recv_tensors, send_tensors)
+#        elapsed = time.time() - t1
+#        print(f'all to all complete in {elapsed}', flush=True)
     else:
         max_n_elems = Config.max_collective_size
         total_elems = sum(r_tensor.numel() for r_tensor in recv_tensors) + \
             sum(s_tensor.numel() for s_tensor in send_tensors)
         n_rounds_t = torch.tensor(max(1, total_elems // max_n_elems))
-        all_reduce(n_rounds_t, dist.ReduceOp.MAX,move_to_comm_device = True)
+        all_reduce(n_rounds_t, dist.ReduceOp.MAX, move_to_comm_device=True)
         n_rounds = int(n_rounds_t.item())
         logger.debug(f'all to all using {n_rounds}')
         for round_idx in range(n_rounds):
@@ -380,13 +431,15 @@ def exchange_tensors(tensors: List[torch.Tensor], recv_sizes: Optional[List[int]
             comm_device()) for _ in range(len(tensors))]
 
         all_to_all(all_their_sizes, all_my_sizes)
+        #print('all my sizes', all_my_sizes)
+        #print('all their sizes', all_their_sizes)
 
         all_their_sizes_i = [cast(int, x.item()) for x in all_their_sizes]
     else:
         all_their_sizes_i = recv_sizes
 
     all_their_sizes_aug = [max(1, x) for x in all_their_sizes_i]
-
+    #print('all their sizes aug', all_their_sizes_aug)
     recv_tensors = [torch.empty(x, *trailing_dimensions,
                                 dtype=dtype).to(comm_device()).fill_(-1) for x in all_their_sizes_aug]
 
