@@ -3,15 +3,15 @@
 
 Data loading and graph construction
 ==========================================================
-After partitioning the graph using DGL's `partition_graph <https://docs.dgl.ai/en/0.6.x/generated/dgl.distributed.partition.partition_graph.html>`_ function, SAR can load the graph data using :func:`sar.load_dgl_partition_data`. This yields a :class:`sar.common_tuples.PartitionData` object. The ``PartitionData`` object can then be used to construct various types of graph-like objects that can be passed to GNN models. You can construct graph objects to use for distributed full-batch training or graph objects to use for distributed training as follows: 
+After partitioning the graph using DGL's `partition_graph <https://docs.dgl.ai/en/0.6.x/generated/dgl.distributed.partition.partition_graph.html>`_ function, SAR can load the graph data using :func:`sar.load_dgl_partition_data`. This yields a :class:`sar.common_tuples.PartitionData` object. The ``PartitionData`` object can then be used to construct various types of graph-like objects that can be passed to GNN models. You can construct graph objects to use for distributed full-batch training or graph objects to use for distributed training as follows:
 
 .. contents:: :local:
     :depth: 3
 
-	    
+
 Full-batch training
 ---------------------------------------------------------------------------------------
-	    
+
 Constructing the full graph for sequential aggregation and rematerialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Construct a single distributed graph object of type :class:`sar.core.GraphShardManager`::
@@ -20,7 +20,7 @@ Construct a single distributed graph object of type :class:`sar.core.GraphShardM
 
 ..
 
-The ``GraphShardManager`` object encapsulates N DGL graph objects (where N is the number of workers). Each graph object represents the edges incoming from one partition (including the local partition). ``GraphShardManager`` implements the ``update_all`` and ``apply_edges`` methods in addition to several other methods from the standard  ``dgl.heterograph.DGLHeterograph`` API.  The ``update_all`` and ``apply_edges`` methods implement the sequential aggregation and rematerialization scheme to realize the distributed forward and backward passes. ``GraphShardManager`` can usually be passed to GNN layers instead of ``dgl.heterograph.DGLHeterograph``. See the :ref:`the distributed graph limitations section<shard-limitations>` for some exceptions.
+The ``GraphShardManager`` object encapsulates N DGL graph objects (where N is the number of workers). Each graph object represents the edges incoming from one partition (including the local partition). ``GraphShardManager`` implements the ``update_all`` and ``apply_edges`` methods in addition to several other methods from the standard  ``dgl.heterograph.DGLGraph`` API.  The ``update_all`` and ``apply_edges`` methods implement the sequential aggregation and rematerialization scheme to realize the distributed forward and backward passes. ``GraphShardManager`` can usually be passed to GNN layers instead of ``dgl.heterograph.DGLGraph``. See the :ref:`the distributed graph limitations section<shard-limitations>` for some exceptions.
 
 Constructing Message Flow Graphs (MFGs) for sequential aggregation and rematerialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -86,7 +86,7 @@ For sampling-based training, use the dataloader provided by SAR: :func:`sar.Data
 
 ::
 
-   shard_manager = sar.construct_full_graph(partition_data)   
+   shard_manager = sar.construct_full_graph(partition_data)
 
    neighbor_sampler = sar.DistNeighborSampler(
    [15, 10, 5], #Fanout for every layer
@@ -103,11 +103,48 @@ For sampling-based training, use the dataloader provided by SAR: :func:`sar.Data
    for blocks in dataloader:
         output = gnn_model(blocks)
 	...
-		
-..		
 
+..
+
+
+Full-graph inference
+---------------------------------------------------------------------------------------
+SAR might also be utilized just for model evaluation. It is preferable to evaluate the model on the entire graph while performing mini-batch distributed training with the DGL package. To accomplish this, SAR can turn a `DistGraph <https://docs.dgl.ai/api/python/dgl.distributed.html#dgl.distributed.DistGraph>`_ object into a GraphShardManager object, allowing for distributed full-graph inference. The procedure is simple since no further steps are required because the model parameters are already synchronized during inference. You can use :func:`sar.convert_dist_graph` in the following way to perform full-graph inference:
+::
+
+    class GNNModel(nn.Module):
+        def __init__(n_layers: int):
+            super().__init__()
+            self.convs = nn.ModuleList([
+                dgl.nn.SAGEConv(100, 100)
+                for _ in range(n_layers)
+            ])
+
+        # forward function prepared for mini-batch training
+        def forward(blocks: List[DGLBlock], features: torch.Tensor):
+            h = features
+            for idx, (layer, block) in enumerate(zip(self.convs, blocks)):
+                h = self.convs[idx](blocks[idx], h)
+            return h
+        
+        # implement inference function for full-graph input 
+        def full_graph_inference(graph: sar.GraphShardManager, featues: torch.Tensor):
+            h = features
+            for idx, layer in enumerate(self.convs):
+                h = layer(graph, h)
+            return h
+
+    # model wrapped in pytorch DistributedDataParallel
+    gnn_model = th.nn.parallel.DistributedDataParallel(GNNModel(3))
     
-   
+    # Convert DistGraph into GraphShardManager
+    gsm = sar.convert_dist_graph(g).to(device)
+
+    # Access to model through DistributedDataParallel module field
+    model_out = gnn_model.module.full_graph_inference(train_blocks, local_node_features)
+..
+
+
 Relevant methods
 ---------------------------------------------------------------------------------------
 
@@ -117,11 +154,11 @@ Relevant methods
 .. autosummary::
    :toctree: Data loading and graph construction
    :template: distneighborsampler
-	     
 
-   load_dgl_partition_data	      
+
+   load_dgl_partition_data
    construct_full_graph
-   construct_mfgs   
+   construct_mfgs
+   convert_dist_graph
    DataLoader
    DistNeighborSampler
-	     
