@@ -22,6 +22,7 @@
 '''
 Top-level SAR package
 '''
+from . import core
 
 from .comm import initialize_comms, rank, world_size, comm_device,\
     nfs_ip_init, sync_params, gather_grads
