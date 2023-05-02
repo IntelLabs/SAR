@@ -11,7 +11,7 @@ Follow the following steps to enable distributed training in your DGL code:
 
 Partition the graph
 ----------------------------------
-Partition the graph using DGL's `partition_graph <https://docs.dgl.ai/en/0.6.x/generated/dgl.distributed.partition.partition_graph.html>`_ function. See `here <https://github.com/dmlc/dgl/blob/master/examples/pytorch/graphsage/dist/partition_graph.py>`_ for an example. The number of partitions should be the same as the number of training machines/workers that will be used. SAR requires consecutive node indices in each partition, and requires that the partition information include the one-hop neighborhoods of all nodes in the partition. Setting ``num_hops = 1`` and ``reshuffle = True`` in the call to ``partition_graph`` takes care of these requirements. ``partition_graph`` yields a directory structure with the partition information and a .json file ``graph_name.json``.
+Partition the graph using DGL's `partition_graph <https://docs.dgl.ai/en/0.6.x/generated/dgl.distributed.partition.partition_graph.html>`_ function. See `here <https://github.com/dmlc/dgl/blob/master/examples/pytorch/graphsage/dist/partition_graph.py>`_ for an example. The number of partitions should be the same as the number of training machines/workers that will be used. SAR requires consecutive node indices in each partition, and requires that the partition information include the one-hop neighborhoods of all nodes in the partition. Setting ``num_hops = 1`` in the call to ``partition_graph`` takes care of these requirements. ``partition_graph`` yields a directory structure with the partition information and a .json file ``graph_name.json``.
 
 
 An example of partitioning the ogbn-arxiv graph in two parts: ::
@@ -44,7 +44,7 @@ An example of partitioning the ogbn-arxiv graph in two parts: ::
         graph.ndata[name] = val
 
     dgl.distributed.partition_graph(
-        graph, 'arxiv', 2, './test_partition_data/', num_hops=1, reshuffle=True)
+        graph, 'arxiv', 2, './test_partition_data/', num_hops=1)
 	
 ..
 
