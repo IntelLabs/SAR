@@ -3,6 +3,12 @@ import multiprocessing as mp
 import traceback
 import pytest
 
+def handle_mp_exception(mp_dict):
+    msg = mp_dict.get('traceback', "")
+    for e_arg in mp_dict['exception'].args:
+        msg += str(e_arg)
+    pytest.fail(str(msg), pytrace=False)
+    
 def sar_test(func):
     """
     A decorator function that wraps all SAR tests with the primary objective
@@ -35,11 +41,7 @@ def sar_test(func):
         p.join()
 
         if 'exception' in mp_dict:
-            print(mp_dict['exception'].args)
-            msg = mp_dict.get('traceback', ())
-            for e_arg in mp_dict['exception'].args:
-                msg += str(e_arg)
-            pytest.fail(str(msg), pytrace=False)
+            handle_mp_exception(mp_dict)
 
         return mp_dict["result"]
     return test_wrapper

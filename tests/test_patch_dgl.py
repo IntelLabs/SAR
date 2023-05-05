@@ -16,4 +16,5 @@ def test_patch_dgl():
 
     assert dgl.nn.pytorch.conv.gatconv.edge_softmax == sar.patched_edge_softmax
     assert dgl.nn.pytorch.conv.dotgatconv.edge_softmax == sar.patched_edge_softmax
-    assert dgl.nn.pytorch.conv.agnnconv.edge_softmax == sar.patched_edge_softmax
+    assert dgl.nn.pytorch.conv.RelGraphConv == sar.RelGraphConv
+    assert dgl.nn.RelGraphConv == sar.RelGraphConv
