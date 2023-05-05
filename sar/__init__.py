@@ -32,7 +32,7 @@ from .data_loading import load_dgl_partition_data, suffix_key_lookup
 from .distributed_bn import DistributedBN1D
 from .config import Config
 from .edge_softmax import edge_softmax
-from .patch_dgl import patch_dgl
+from .patch_dgl import patch_dgl, patched_edge_softmax
 from .logging_setup import logging_setup, logger
 
 
@@ -41,4 +41,4 @@ __all__ = ['initialize_comms', 'rank', 'world_size', 'nfs_ip_init',
            'construct_mfgs', 'construct_full_graph', 'GraphShardManager',
            'load_dgl_partition_data', 'suffix_key_lookup', 'Config', 'edge_softmax',
            'message_has_parameters', 'DistributedBlock', 'DistNeighborSampler', 'DataLoader',
-           'logging_setup', 'logger', 'sync_params', 'gather_grads', 'patch_dgl']
+           'logging_setup', 'logger', 'sync_params', 'gather_grads', 'patch_dgl', 'patched_edge_softmax']
