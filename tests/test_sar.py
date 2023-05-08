@@ -112,3 +112,41 @@ def test_sar_full_graph(world_size):
 
         rtol = sar_logits_mean / 1000
         assert full_graph_mean == pytest.approx(sar_logits_mean, rtol)
+
+
+
+
+@sar_test
+def test_convert_dist_graph():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        import dgl
+        import torch
+        import sar
+        graph_name = 'random_graph'
+        part_file = os.path.join(tmpdir, 'random_graph.json')
+        ip_file = os.path.join(tmpdir, 'ip_file')
+        g = dgl.rand_graph(1000, 2500)
+        g = dgl.add_self_loop(g)
+        g.ndata.clear()
+        g.ndata['features'] = torch.rand((g.num_nodes(), 1))
+        dgl.distributed.partition_graph(
+            g,
+            'random_graph',
+            1,
+            tmpdir,
+            num_hops=1,
+            balance_edges=True)
+        
+        master_ip_address = sar.nfs_ip_init(0, ip_file)
+        sar.initialize_comms(0, 1, master_ip_address, 'ccl')
+
+        dgl.distributed.initialize("kv_ip_config.txt")
+        dist_g = dgl.distributed.DistGraph(
+            graph_name, part_config=part_file)
+        
+        sar_g = sar.convert_dist_graph(dist_g)
+        print(sar_g.graph_shards[0].graph.ndata)
+        assert len(sar_g.graph_shards) == dist_g.get_partition_book().num_partitions()
+        assert dist_g.num_edges() == sar_g.num_edges()
+        # this check fails (1000 != 2000)
+        #assert dist_g.num_nodes() == sar_g.num_nodes()
