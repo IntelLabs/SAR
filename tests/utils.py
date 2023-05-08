@@ -2,11 +2,13 @@
 import multiprocessing as mp
 import traceback
 import pytest
+import functools
 
 def handle_mp_exception(mp_dict):
     msg = mp_dict.get('traceback', "")
     for e_arg in mp_dict['exception'].args:
         msg += str(e_arg)
+    print(str(msg), flush=True)
     pytest.fail(str(msg), pytrace=False)
     
 def sar_test(func):
@@ -18,6 +20,7 @@ def sar_test(func):
     :type func: function
     :returns: A function that encapsulates the pytest function.
     """
+    @functools.wraps(func)
     def test_wrapper(*args, **kwargs):
         """
         The wrapping process involves defining another nested function, which is then invoked by a newly spawned process.
@@ -36,7 +39,7 @@ def sar_test(func):
         mp_dict = manager.dict()
 
         mp_args = (func, mp_dict) + args
-        p = mp.Process(target=process_wrapper, args=mp_args, **kwargs)
+        p = mp.Process(target=process_wrapper, args=mp_args, kwargs=kwargs)
         p.start()
         p.join()
 

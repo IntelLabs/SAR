@@ -1,13 +1,11 @@
 from utils import *
 import os
-import scipy
 import tempfile
-import logging
+
 import numpy as np
-# Do not import DGL and SAR - these modules should be independent in each process
+# Do not import DGL and SAR - these modules should be
+# independently loaded inside each process
 
-
-    
 def sar_process(mp_dict, rank, world_size, tmp_dir):
     """
     This function should be an entry point to the 'independent' process.
@@ -33,7 +31,7 @@ def sar_process(mp_dict, rank, world_size, tmp_dir):
             dgl.distributed.partition_graph(
                 graph,
                 'random_graph',
-                2,
+                world_size,
                 tmp_dir,
                 num_hops=1,
                 balance_edges=True)
@@ -65,7 +63,6 @@ def sar_process(mp_dict, rank, world_size, tmp_dir):
         # put calculated results in multiprocessing dictionary
         mp_dict[f"result_{rank}"] = logits.detach()
 
-
         if rank == 0:
             # only rank 0 is runned within parent process
             # return used model and generated graph to caller
@@ -77,17 +74,25 @@ def sar_process(mp_dict, rank, world_size, tmp_dir):
         return None, None
 
 
-def test_sar_full_graph():
+@pytest.mark.parametrize('world_size', [2, 4])
+@sar_test
+def test_sar_full_graph(world_size):
+    print(world_size)
     with tempfile.TemporaryDirectory() as tmpdir:
         manager = mp.Manager()
         mp_dict = manager.dict()
 
-        p = mp.Process(target=sar_process, args=(mp_dict, 1, 2, tmpdir))
-        p.daemon = True
-        p.start()
+        processes = []
+        for rank in range(1, world_size):
+            p = mp.Process(target=sar_process, args=(mp_dict, rank, world_size, tmpdir))
+            p.daemon = True
+            p.start()
+            processes.append(p)
 
-        model, graph = sar_process(mp_dict, 0, 2, tmpdir)
-        p.join()
+        model, graph = sar_process(mp_dict, 0, world_size, tmpdir)
+
+        for p in processes:
+            p.join()
 
         if 'exception' in mp_dict:
             handle_mp_exception(mp_dict)
@@ -98,9 +103,12 @@ def test_sar_full_graph():
         # TODO: reorder SAR calculated logits to original NID mapping 
         full_graph_mean = out.mean()
 
-        r0_logits = mp_dict["result_0"].numpy()
-        r1_logits = mp_dict["result_1"].numpy()
-        sar_logits_mean = np.concatenate((r0_logits, r1_logits)).mean()
+        sar_logits = mp_dict["result_0"].numpy()
+        for rank in range(1, world_size):
+            rank_logits = mp_dict[f"result_{rank}"].numpy()
+            sar_logits = np.concatenate((sar_logits, rank_logits))
+
+        sar_logits_mean = sar_logits.mean()
 
         rtol = sar_logits_mean / 1000
         assert full_graph_mean == pytest.approx(sar_logits_mean, rtol)
