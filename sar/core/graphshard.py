@@ -123,6 +123,42 @@ class GraphShard:
         if self._graph_reverse is not None:
             self._graph_reverse = self._graph_reverse.to(device)
 
+class GSMDataStore():
+    """
+    A straightforward class designed to manage dictionaries for srdata, dstdata, and edata.
+    It enables the creation of chained data and allows for rewinding all data simultaneously.
+    """
+    def __init__(self, src_is_tgt: bool, num_src_nodes: int, num_dst_nodes: int, num_edges: int):
+        self.src_is_tgt = src_is_tgt
+
+        if src_is_tgt:
+            assert num_src_nodes == num_dst_nodes, "Number of source nodes must be equal to the number of target nodes"
+        
+        if src_is_tgt:
+            self.srcdata = self.dstdata = self.ndata = ChainedDataView(num_src_nodes)
+        else:
+            self.srcdata = ChainedDataView(num_src_nodes)
+            self.dstdata = ChainedDataView(num_dst_nodes)
+        
+        self.edata = ChainedDataView(num_edges)
+
+    def chain_data(self):
+        if self.src_is_tgt:
+            self.srcdata = self.dstdata = ChainedDataView(self.srcdata.acceptable_size, self.srcdata)
+        else:
+            self.srcdata = ChainedDataView(self.srcdata.acceptable_size, self.srcdata)
+            self.dstdata = ChainedDataView(self.dstdata.acceptable_size, self.dstdata)
+
+        self.edata = ChainedDataView(self.edata.acceptable_size, self.edata)
+    
+    def rewind_data(self):
+        if self.src_is_tgt:
+            self.srcdata = self.dstdata = self.srcdata.rewind()   
+        else:
+            self.srcdata = self.srcdata.rewind()
+            self.dstdata = self.dstdata.rewind()
+
+        self.edata.rewind()  
 
 class ChainedDataView(MutableMapping):
     """A dictionary that chains to children dictionary on missed __getitem__ calls"""
@@ -195,6 +231,10 @@ class GraphShardManager:
         super().__init__()
         self.graph_shards = graph_shards
 
+        # source nodes and target nodes are all the same
+        # srcdata, dstdata and ndata should be also the same
+        self.src_is_tgt = local_src_seeds is local_tgt_seeds
+
         assert all(self.tgt_node_range ==
                    x.tgt_range for x in self.graph_shards[1:])
 
@@ -227,17 +267,16 @@ class GraphShardManager:
         self.in_degrees_cache: Dict[Optional[str], Tensor] = {}
         self.out_degrees_cache: Dict[Optional[str], Tensor] = {}
 
-        self.dstdata = ChainedDataView(self.num_dst_nodes())
-        self.srcdata = ChainedDataView(self.num_src_nodes())
-        self.edata = ChainedDataView(self.num_edges())
+        self.datastore = GSMDataStore(self.src_is_tgt, self.num_src_nodes(),
+                                      self.num_dst_nodes(), self.num_edges())
 
         self._sampling_graph = None
 
-    @ property
+    @property
     def tgt_node_range(self) -> Tuple[int, int]:
         return self.graph_shards[0].tgt_range
 
-    @ property
+    @property
     def local_src_node_range(self) -> Tuple[int, int]:
         return self.graph_shards[rank()].src_range
 
@@ -292,19 +331,30 @@ class GraphShardManager:
             ind.sub_(self.tgt_node_range[0])
         return indices_required_from_me
 
-    @ contextmanager
+    @contextmanager
     def local_scope(self):
-        self.dstdata = ChainedDataView(
-            self.dstdata.acceptable_size, self.dstdata)
-        self.srcdata = ChainedDataView(
-            self.srcdata.acceptable_size, self.srcdata)
-        self.edata = ChainedDataView(self.edata.acceptable_size, self.edata)
+        self.datastore.chain_data()
         yield
-        self.dstdata = self.dstdata.rewind()
-        self.srcdata = self.srcdata.rewind()
-        self.edata = self.edata.rewind()
+        self.datastore.rewind_data()
 
-    @ property
+    @property
+    def srcdata(self):
+        return self.datastore.srcdata
+    
+    @property
+    def dstdata(self):
+        return self.datastore.dstdata
+
+    @property
+    def edata(self):
+        return self.datastore.edata
+
+    @property
+    def ndata(self):
+        assert self.src_is_tgt, "ndata shouldn't be used with MFGs"
+        return self.datastore.srcdata
+
+    @property
     def is_block(self):
         return True
 
