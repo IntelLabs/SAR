@@ -2,7 +2,7 @@ name: SAR tests
 
 on:
   pull_request:
-     branches: [main, convert]
+     branches: [main]
   workflow_dispatch:
 
 jobs:
