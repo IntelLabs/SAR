@@ -141,7 +141,7 @@ SAR might also be utilized just for model evaluation. It is preferable to evalua
     gsm = sar.convert_dist_graph(g).to(device)
 
     # Access to model through DistributedDataParallel module field
-    model_out = gnn_model.module.full_graph_inference(train_blocks, local_node_features)
+    model_out = gnn_model.module.full_graph_inference(gsm, local_node_features)
 ..
 
 

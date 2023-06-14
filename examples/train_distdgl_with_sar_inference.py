@@ -16,7 +16,7 @@ import sar
            
 def load_subtensor(g, seeds, input_nodes, device, load_feat=True):
     """
-    Copys features and labels of a set of nodes onto GPU.
+    Copies features and labels of a set of nodes onto GPU.
     """
     batch_inputs = (
         g.ndata["features"][input_nodes].to(device) if load_feat else None
@@ -427,11 +427,10 @@ def main(args):
     else:
         dev_id = g.rank() % args.num_gpus
         device = th.device("cuda:" + str(dev_id))
-    n_classes = args.n_classes
-    if n_classes == 0:
-        labels = g.ndata["labels"][np.arange(g.num_nodes())]
-        n_classes = len(th.unique(labels[th.logical_not(th.isnan(labels))]))
-        del labels
+
+    labels = g.ndata["labels"][np.arange(g.num_nodes())]
+    n_classes = len(th.unique(labels[th.logical_not(th.isnan(labels))]))
+    del labels
     print("#labels:", n_classes)
 
     # Pack data
@@ -449,9 +448,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--part_config", type=str, help="The path to the partition config file"
-    )
-    parser.add_argument(
-        "--n_classes", type=int, default=0, help="the number of classes"
     )
     parser.add_argument(
         "--backend",
