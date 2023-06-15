@@ -123,42 +123,6 @@ class GraphShard:
         if self._graph_reverse is not None:
             self._graph_reverse = self._graph_reverse.to(device)
 
-class GSMDataStore():
-    """
-    A straightforward class designed to manage dictionaries for srdata, dstdata, and edata.
-    It enables the creation of chained data and allows for rewinding all data simultaneously.
-    """
-    def __init__(self, src_is_tgt: bool, num_src_nodes: int, num_dst_nodes: int, num_edges: int):
-        self.src_is_tgt = src_is_tgt
-
-        if src_is_tgt:
-            assert num_src_nodes == num_dst_nodes, "Number of source nodes must be equal to the number of target nodes"
-        
-        if src_is_tgt:
-            self.srcdata = self.dstdata = self.ndata = ChainedDataView(num_src_nodes)
-        else:
-            self.srcdata = ChainedDataView(num_src_nodes)
-            self.dstdata = ChainedDataView(num_dst_nodes)
-        
-        self.edata = ChainedDataView(num_edges)
-
-    def chain_data(self):
-        if self.src_is_tgt:
-            self.srcdata = self.dstdata = ChainedDataView(self.srcdata.acceptable_size, self.srcdata)
-        else:
-            self.srcdata = ChainedDataView(self.srcdata.acceptable_size, self.srcdata)
-            self.dstdata = ChainedDataView(self.dstdata.acceptable_size, self.dstdata)
-
-        self.edata = ChainedDataView(self.edata.acceptable_size, self.edata)
-    
-    def rewind_data(self):
-        if self.src_is_tgt:
-            self.srcdata = self.dstdata = self.srcdata.rewind()   
-        else:
-            self.srcdata = self.srcdata.rewind()
-            self.dstdata = self.dstdata.rewind()
-
-        self.edata.rewind()  
 
 class ChainedDataView(MutableMapping):
     """A dictionary that chains to children dictionary on missed __getitem__ calls"""
@@ -267,8 +231,14 @@ class GraphShardManager:
         self.in_degrees_cache: Dict[Optional[str], Tensor] = {}
         self.out_degrees_cache: Dict[Optional[str], Tensor] = {}
 
-        self.datastore = GSMDataStore(self.src_is_tgt, self.num_src_nodes(),
-                                      self.num_dst_nodes(), self.num_edges())
+        self.srcdata = ChainedDataView(self.num_src_nodes())
+        self.edata = ChainedDataView(self.num_edges())
+
+        if self.src_is_tgt:
+            assert self.num_src_nodes() == self.num_dst_nodes()
+            self.dstdata = self.srcdata
+        else:
+            self.dstdata = ChainedDataView(self.num_dst_nodes())
 
         self._sampling_graph = None
 
@@ -333,26 +303,26 @@ class GraphShardManager:
 
     @contextmanager
     def local_scope(self):
-        self.datastore.chain_data()
+        self.srcdata = ChainedDataView(
+            self.srcdata.acceptable_size, self.srcdata)
+        self.edata = ChainedDataView(self.edata.acceptable_size, self.edata)
+        if self.src_is_tgt:
+            self.dstdata = self.srcdata
+        else:
+            self.dstdata = ChainedDataView(
+                self.dstdata.acceptable_size, self.dstdata)
         yield
-        self.datastore.rewind_data()
-
-    @property
-    def srcdata(self):
-        return self.datastore.srcdata
-    
-    @property
-    def dstdata(self):
-        return self.datastore.dstdata
-
-    @property
-    def edata(self):
-        return self.datastore.edata
+        self.srcdata = self.srcdata.rewind()
+        self.edata = self.edata.rewind()
+        if self.src_is_tgt:
+            self.dstdata = self.srcdata
+        else:
+            self.dstdata = self.dstdata.rewind()
 
     @property
     def ndata(self):
         assert self.src_is_tgt, "ndata shouldn't be used with MFGs"
-        return self.datastore.srcdata
+        return self.srcdata
 
     @property
     def is_block(self):
