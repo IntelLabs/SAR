@@ -305,6 +305,20 @@ class CorrectAndSmooth(nn.Module):
 
 
 def evaluate(logits, labels, masks):
+    """
+    Calculating accuracy metric over train, validation and test indices (in a distributed way).
+
+    :param logits: Predictions of the model
+    :type logits: Tensor
+    :param labels: Ground truth labels
+    :type labels: Tensor
+    :param masks: Dictionary of Tensors, that contain indices for train, validation and test sets
+    :type masks: Dictionary
+    
+    :returns: Tuple of accuracy metrics: train, validation, test
+    """
+    import pdb
+    pdb.set_trace()
     results = []
     for indices_name in ['train_indices', 'val_indices', 'test_indices']:
         n_correct = (logits[masks[indices_name]].argmax(1) ==
@@ -328,7 +342,7 @@ def data_normalization(features, world_size):
     dataset, workers must communicate with each other.
 
 
-    :param features: dataset's features
+    :param features: Dataset's features
     :type features: Tensor
     :param world_size: Number of workers. The same as the number of graph partitions
     :type world_size: int
