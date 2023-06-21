@@ -40,10 +40,30 @@ logger.addHandler(logging.NullHandler())
 logger.setLevel(logging.DEBUG)
 
 
+def get_socket() -> ifaddr._shared.Adapter:
+    """
+    Gets the socket on the current host. If preffered socket is not specified using SOCKET_NAME
+    environment variable, the function returns the first available socket from `ifaddr.get_adapters()`
+    
+    :returns: Preffered or the first available socket
+    """
+    adaps = ifaddr.get_adapters()
+    preferred_socket = os.environ.get("SOCKET_NAME")
+    if preferred_socket is not None:
+        adaps = list(filter(lambda x: x.nice_name == preferred_socket, adaps))
+        if not adaps:
+            raise ValueError(f'Socket with given name: "{preferred_socket}" was not found.')
+    else:
+        adaps = list(filter(lambda x: x.nice_name != "lo", adaps))
+    return adaps[0]
+
+
 def get_ip_address(ip_file: str) -> str:
-    '''
+    """
     Reads ip address from ip_file. Blocks until the file is created
-    '''
+    
+    :returns: IP address
+    """
     while True:
         while not os.path.isfile(ip_file):
             logger.info('waiting for ip file to be created')
@@ -56,45 +76,18 @@ def get_ip_address(ip_file: str) -> str:
     return ip_addr
 
 
-def get_socket_name() -> str:
-    '''
-    Gets the socket name on the current host. Prefers Infiniband sockets
-    if multiple sockets exist
-    '''
-    adaps = ifaddr.get_adapters()
-    ib_adapters = [x for x in adaps if 'eib' in x.nice_name]
-    if ib_adapters:
-        logger.info(f'getting socket name for ib adapter: {ib_adapters[0]}')
-        sock_name = ib_adapters[0].nice_name
-    else:
-        eth_adapters = [
-            x for x in adaps if 'eth' in x.nice_name or 'enp' in x.nice_name]
-        logger.info(
-            f'getting socket name for ethernet adapter: {eth_adapters[0]}')
-        sock_name = eth_adapters[0].nice_name
-    return sock_name
-
-
 def dump_ip_address(ip_file: str) -> str:
-    """Dumps the ip address of the current host to a file
-    Prioritizes finding an infiniband adapter and dumping its address.
+    """
+    Dumps the ip address of the current host to a file
 
     :param ip_file: File name where the ip address of the local host will be dumped
     :type ip_file: str
+    
     :returns: A string containing the ip address of the local host
-
     """
-
-    adaps = ifaddr.get_adapters()
-    ib_adapters = [x for x in adaps if 'eib' in x.nice_name]
-    if ib_adapters:
-        logger.info(f'found infinity band adapter: {ib_adapters[0]}')
-        host_ip = ib_adapters[0].ips[0].ip
-    else:
-        eth_adapters = [
-            x for x in adaps if 'eth' in x.nice_name or 'enp' in x.nice_name]
-        logger.info(f'using ethernet adapter: {eth_adapters}')
-        host_ip = eth_adapters[0].ips[0].ip
+    adap = get_socket()
+    print(f"SOCKET: {adap}")
+    host_ip = adap.ips[0].ip
     with open(ip_file, 'w', encoding='utf-8') as f_handle:
         f_handle.write(host_ip)
     logger.info(f'wrote ip {host_ip} to file {ip_file}')
@@ -121,10 +114,12 @@ def nfs_ip_init(_rank: int, ip_file: str) -> str:
 
     :param _rank: Rank of the current machine
     :type _rank: int
-    :param ip_file:  Path to the ip file that will be used to communicate the ip address between workers. The master will write its ip address to this file. Other workers will block until this file is created, and then read the ip address from it.
+    :param ip_file:  Path to the ip file that will be used to communicate the ip address between workers.\
+    The master will write its ip address to this file. Other workers will block until\
+    this file is created, and then read the ip address from it.
     :type ip_file: str
+    
     :returns:  A string with the ip address of the master machine/worker
-
     """
     if _rank == 0:
         master_ip = dump_ip_address(ip_file)
@@ -173,14 +168,15 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
     os.environ['MASTER_ADDR'] = master_ip_address
     os.environ['MASTER_PORT'] = str(master_port_number)
 
-    sock_name = get_socket_name()
-    os.environ['TP_SOCKET_IFNAME'] = sock_name
-    os.environ['GLOO_SOCKET_IFNAME'] = sock_name
-    os.environ['CCL_SOCKET_IFNAME'] = sock_name
-    os.environ['NCCL_SOCKET_IFNAME'] = sock_name
+    socket = get_socket()
+    print(f"SOCKET NAME: {socket.nice_name}")
+    os.environ['TP_SOCKET_IFNAME'] = socket.nice_name
+    os.environ['GLOO_SOCKET_IFNAME'] = socket.nice_name
+    os.environ['CCL_SOCKET_IFNAME'] = socket.nice_name
+    os.environ['NCCL_SOCKET_IFNAME'] = socket.nice_name
 
-    os.environ['FI_VERBS_IFACE'] = sock_name
-    os.environ['FI_mlx_IFACE'] = sock_name
+    os.environ['FI_VERBS_IFACE'] = socket.nice_name
+    os.environ['FI_mlx_IFACE'] = socket.nice_name
 
     os.environ['MPI_COMM_WORLD'] = str(_world_size)
     os.environ['MPI_COMM_RANK'] = str(_rank)
