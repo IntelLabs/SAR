@@ -86,7 +86,6 @@ def dump_ip_address(ip_file: str) -> str:
     :returns: A string containing the ip address of the local host
     """
     adap = get_socket()
-    print(f"SOCKET: {adap}")
     host_ip = adap.ips[0].ip
     with open(ip_file, 'w', encoding='utf-8') as f_handle:
         f_handle.write(host_ip)
@@ -169,7 +168,6 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
     os.environ['MASTER_PORT'] = str(master_port_number)
 
     socket = get_socket()
-    print(f"SOCKET NAME: {socket.nice_name}")
     os.environ['TP_SOCKET_IFNAME'] = socket.nice_name
     os.environ['GLOO_SOCKET_IFNAME'] = socket.nice_name
     os.environ['CCL_SOCKET_IFNAME'] = socket.nice_name
