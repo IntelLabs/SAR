@@ -7,7 +7,7 @@ class GNNModel(nn.Module):
         super().__init__()
 
         self.convs = nn.ModuleList([
-            dgl.nn.GraphConv(in_dim, out_dim, weight=False, bias=False),
+            dgl.nn.GraphConv(in_dim, out_dim, weight=True, bias=False),
         ])
 
     def forward(self,  graph, features):

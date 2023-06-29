@@ -11,7 +11,7 @@ def sar_process(mp_dict, rank, world_size, tmp_dir):
     This function should be an entry point to the 'independent' process.
     It has to simulate behaviour of SAR which will be spawned across different
     machines independently from other instances. Each process have individual memory space
-    so it is suitable environment for testing SAR
+    so it is suitable environment for testing SAR.
     """
     import dgl
     import torch
@@ -46,8 +46,6 @@ def sar_process(mp_dict, rank, world_size, tmp_dir):
                              master_ip_address,
                              'ccl')
 
-        torch.distributed.barrier() # wait for rank 0 to finish graph creation
-
         partition_data = sar.load_dgl_partition_data(
             part_file, rank, 'cpu')
 
@@ -77,6 +75,12 @@ def sar_process(mp_dict, rank, world_size, tmp_dir):
 @pytest.mark.parametrize('world_size', [2, 4])
 @sar_test
 def test_sar_full_graph(world_size):
+    """
+    Partition graph into `world_size` partitions and run `world_size`
+    processes which perform full graph inference using SAR algorithm.
+    Test is comparing mean of concatenated results from all processes
+    with mean of native DGL full graph inference result.
+    """
     print(world_size)
     with tempfile.TemporaryDirectory() as tmpdir:
         manager = mp.Manager()
@@ -97,7 +101,7 @@ def test_sar_full_graph(world_size):
         if 'exception' in mp_dict:
             handle_mp_exception(mp_dict)
 
-        out = model(graph, graph.ndata['features']).numpy()
+        out = model(graph, graph.ndata['features']).detach().numpy()
 
         # compare mean of all values instead of each node feature individually
         # TODO: reorder SAR calculated logits to original NID mapping 
@@ -113,11 +117,13 @@ def test_sar_full_graph(world_size):
         rtol = sar_logits_mean / 1000
         assert full_graph_mean == pytest.approx(sar_logits_mean, rtol)
 
-
-
-
 @sar_test
 def test_convert_dist_graph():
+    """
+    Create DGL's DistGraph object with random graph partitioned into
+    one part (only way to test DistGraph locally). Then perform converting
+    DistGraph into SAR GraphShardManager and check relevant properties.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         import dgl
         import torch
@@ -137,13 +143,14 @@ def test_convert_dist_graph():
             num_hops=1,
             balance_edges=True)
         
-        master_ip_address = sar.nfs_ip_init(0, ip_file)
-        sar.initialize_comms(0, 1, master_ip_address, 'ccl')
+        master_ip_address = sar.nfs_ip_init(_rank=0, ip_file=ip_file)
+        sar.initialize_comms(_rank=0, _world_size=1,
+                             master_ip_address=master_ip_address, backend='ccl')
 
         dgl.distributed.initialize("kv_ip_config.txt")
         dist_g = dgl.distributed.DistGraph(
             graph_name, part_config=part_file)
-        
+
         sar_g = sar.convert_dist_graph(dist_g)
         print(sar_g.graph_shards[0].graph.ndata)
         assert len(sar_g.graph_shards) == dist_g.get_partition_book().num_partitions()
