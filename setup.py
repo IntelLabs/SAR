@@ -12,6 +12,8 @@ setup(
     packages=find_packages(),
     author='Hesham Mostafa',
     author_email='hesham.mostafa@intel.com',
+    maintainer='Bartlomiej Gawrych, Kacper Pietkun',
+    maintainer_email='gawrych.bartlomiej@gmail.com, kacper.pietkun@intel.com',
     description='A Python library for distributed training of Graph Neural Networks (GNNs) on large graphs, '
                 'supporting both full-batch and sampling-based training, and utilizing a sequential aggregation'
                 'and rematerialization technique for linear memory scaling.',
