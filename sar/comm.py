@@ -176,7 +176,7 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
             try:
                 import torch_ccl  # type: ignore
             except:
-                raise "None of the oneccl_bindings_for_pytorch and torch_ccl package has been found"
+                raise ImportError("None of the oneccl_bindings_for_pytorch and torch_ccl package has been found")
 
     if not dist.is_initialized():
         os.environ['MASTER_ADDR'] = master_ip_address
