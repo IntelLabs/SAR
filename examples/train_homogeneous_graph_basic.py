@@ -110,7 +110,8 @@ def main():
     # Obtain the ip address of the master through the network file system
     master_ip_address = sar.nfs_ip_init(args.rank, args.ip_file)
     sar.initialize_comms(args.rank,
-                         args.world_size, master_ip_address,
+                         args.world_size,
+                         master_ip_address,
                          args.backend)
 
     # Load DGL partition data

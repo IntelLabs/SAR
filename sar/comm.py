@@ -67,8 +67,9 @@ def get_socket_name() -> str:
         logger.info(f'getting socket name for ib adapter: {ib_adapters[0]}')
         sock_name = ib_adapters[0].nice_name
     else:
+        acceptable_prefixes = ['eth', 'ens', 'enp']
         eth_adapters = [
-            x for x in adaps if 'eth' in x.nice_name or 'enp' in x.nice_name]
+            x for x in adaps if any(prefix in x.nice_name for prefix in acceptable_prefixes)]
         logger.info(
             f'getting socket name for ethernet adapter: {eth_adapters[0]}')
         sock_name = eth_adapters[0].nice_name
@@ -91,8 +92,9 @@ def dump_ip_address(ip_file: str) -> str:
         logger.info(f'found infinity band adapter: {ib_adapters[0]}')
         host_ip = ib_adapters[0].ips[0].ip
     else:
+        acceptable_prefixes = ['eth', 'ens', 'enp']
         eth_adapters = [
-            x for x in adaps if 'eth' in x.nice_name or 'enp' in x.nice_name]
+            x for x in adaps if any(prefix in x.nice_name for prefix in acceptable_prefixes)]
         logger.info(f'using ethernet adapter: {eth_adapters}')
         host_ip = eth_adapters[0].ips[0].ip
     with open(ip_file, 'w', encoding='utf-8') as f_handle:
@@ -156,7 +158,7 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
 
     """
     assert backend in ['ccl', 'nccl',
-                       'mpi'], 'backend must be ccl,nccl, or mpi'
+                       'mpi'], 'backend must be ccl, nccl, or mpi'
     if _comm_device is None:
         if backend == 'nccl':
             _comm_device = torch.device('cuda')
@@ -168,34 +170,44 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
 
     if backend == 'ccl':
         # pylint: disable=unused-import
-        import torch_ccl  # type: ignore
+        try:
+            import oneccl_bindings_for_pytorch   # type: ignore
+        except:
+            try:
+                import torch_ccl  # type: ignore
+            except:
+                raise ImportError("None of the oneccl_bindings_for_pytorch and torch_ccl package has been found")
 
-    os.environ['MASTER_ADDR'] = master_ip_address
-    os.environ['MASTER_PORT'] = str(master_port_number)
+    if not dist.is_initialized():
+        os.environ['MASTER_ADDR'] = master_ip_address
+        os.environ['MASTER_PORT'] = str(master_port_number)
 
-    sock_name = get_socket_name()
-    os.environ['TP_SOCKET_IFNAME'] = sock_name
-    os.environ['GLOO_SOCKET_IFNAME'] = sock_name
-    os.environ['CCL_SOCKET_IFNAME'] = sock_name
-    os.environ['NCCL_SOCKET_IFNAME'] = sock_name
+        sock_name = get_socket_name()
+        os.environ['TP_SOCKET_IFNAME'] = sock_name
+        os.environ['GLOO_SOCKET_IFNAME'] = sock_name
+        os.environ['CCL_SOCKET_IFNAME'] = sock_name
+        os.environ['NCCL_SOCKET_IFNAME'] = sock_name
 
-    os.environ['FI_VERBS_IFACE'] = sock_name
-    os.environ['FI_mlx_IFACE'] = sock_name
+        os.environ['FI_VERBS_IFACE'] = sock_name
+        os.environ['FI_mlx_IFACE'] = sock_name
 
-    os.environ['MPI_COMM_WORLD'] = str(_world_size)
-    os.environ['MPI_COMM_RANK'] = str(_rank)
+        os.environ['MPI_COMM_WORLD'] = str(_world_size)
+        os.environ['MPI_COMM_RANK'] = str(_rank)
 
-    os.environ['OMPI_COMM_WORLD'] = str(_world_size)
-    os.environ['OMPI_COMM_RANK'] = str(_rank)
+        os.environ['OMPI_COMM_WORLD'] = str(_world_size)
+        os.environ['OMPI_COMM_RANK'] = str(_rank)
 
-    os.environ['IMPI_COMM_WORLD'] = str(_world_size)
-    os.environ['IMPI_COMM_RANK'] = str(_rank)
+        os.environ['IMPI_COMM_WORLD'] = str(_world_size)
+        os.environ['IMPI_COMM_RANK'] = str(_rank)
 
-    os.environ['I_MPI_COMM_WORLD'] = str(_world_size)
-    os.environ['I_MPI_COMM_RANK'] = str(_rank)
+        os.environ['I_MPI_COMM_WORLD'] = str(_world_size)
+        os.environ['I_MPI_COMM_RANK'] = str(_rank)
 
-    dist.init_process_group(
-        backend=backend, rank=_rank, world_size=_world_size)
+        dist.init_process_group(
+             backend=backend, rank=_rank, world_size=_world_size)
+    else:
+        assert dist.get_backend() in ['ccl', 'nccl',
+                       'mpi'], 'backend must be ccl, nccl, or mpi'
 
     _CommData.rank = _rank
     _CommData.world_size = _world_size

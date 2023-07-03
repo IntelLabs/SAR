@@ -33,7 +33,7 @@ from collections.abc import MutableMapping
 from contextlib import contextmanager
 import torch
 import dgl  # type:ignore
-from dgl import DGLHeteroGraph
+from dgl import DGLGraph
 from dgl.function.base import TargetCode  # type:ignore
 import dgl.function as fn  # type: ignore
 from torch import Tensor
@@ -94,7 +94,7 @@ class GraphShard:
                                       num_dst_nodes=self.unique_tgt_nodes.size(
                                           0)
                                       )
-        self._graph_reverse: Optional[DGLHeteroGraph] = None
+        self._graph_reverse: Optional[DGLGraph] = None
         self._shard_info: Optional[ShardInfo] = None
         self.graph.edata.update(shard_edges_features.edge_features)
 
@@ -108,7 +108,7 @@ class GraphShard:
         return self._shard_info
 
     @property
-    def graph_reverse(self) -> DGLHeteroGraph:
+    def graph_reverse(self) -> DGLGraph:
         if self._graph_reverse is None:
             edges_src, edges_tgt = self.graph.all_edges()
             self._graph_reverse = dgl.create_block((edges_tgt, edges_src),
@@ -169,7 +169,7 @@ class ChainedDataView(MutableMapping):
 class GraphShardManager:
     """
     Manages the local graph partition and exposes a subset of the interface
-    of dgl.heterograph.DGLHeteroGraph. Most importantly, it implements a
+    of dgl.heterograph.DGLGraph. Most importantly, it implements a
     distributed version of the ``update_all`` and ``apply_edges`` functions
     which are extensively used by GNN layers to exchange messages. By default, 
     both  ``update_all`` and  ``apply_edges`` use sequential aggregation and 
