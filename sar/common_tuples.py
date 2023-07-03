@@ -121,3 +121,8 @@ class ShardInfo(NamedTuple):
     src_node_range: Tuple[int, int]
     tgt_node_range: Tuple[int, int]
     edge_range: Tuple[int, int]
+
+
+class SocketInfo(NamedTuple):
+    nice_name: str
+    ip_addr: str

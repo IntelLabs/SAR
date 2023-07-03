@@ -34,13 +34,14 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 from .config import Config
+from .common_tuples import SocketInfo
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 logger.setLevel(logging.DEBUG)
 
 
-def get_socket() -> ifaddr._shared.Adapter:
+def get_socket() -> SocketInfo:
     """
     Gets the socket on the current host. If preffered socket is not specified using SAR_SOCKET_NAME
     environment variable, the function returns the first available socket from `ifaddr.get_adapters()`
@@ -55,7 +56,7 @@ def get_socket() -> ifaddr._shared.Adapter:
             raise ValueError(f'Socket with given name: "{preferred_socket}" was not found.')
     else:
         adaps = list(filter(lambda x: x.nice_name != "lo", adaps))
-    return adaps[0]
+    return SocketInfo(adaps[0].nice_name, adaps[0].ips[0].ip)
 
 
 def get_ip_address(ip_file: str) -> str:
@@ -85,8 +86,8 @@ def dump_ip_address(ip_file: str) -> str:
     
     :returns: A string containing the ip address of the local host
     """
-    adap = get_socket()
-    host_ip = adap.ips[0].ip
+    scoket = get_socket()
+    host_ip = scoket.ip_addr
     with open(ip_file, 'w', encoding='utf-8') as f_handle:
         f_handle.write(host_ip)
     logger.info(f'wrote ip {host_ip} to file {ip_file}')
