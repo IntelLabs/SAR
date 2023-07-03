@@ -42,13 +42,13 @@ logger.setLevel(logging.DEBUG)
 
 def get_socket() -> ifaddr._shared.Adapter:
     """
-    Gets the socket on the current host. If preffered socket is not specified using SOCKET_NAME
+    Gets the socket on the current host. If preffered socket is not specified using SAR_SOCKET_NAME
     environment variable, the function returns the first available socket from `ifaddr.get_adapters()`
     
     :returns: Preffered or the first available socket
     """
     adaps = ifaddr.get_adapters()
-    preferred_socket = os.environ.get("SOCKET_NAME")
+    preferred_socket = os.environ.get("SAR_SOCKET_NAME")
     if preferred_socket is not None:
         adaps = list(filter(lambda x: x.nice_name == preferred_socket, adaps))
         if not adaps:
