@@ -40,5 +40,5 @@ python /home/ubuntu/workspace/dgl/tools/launch.py \
     --num_servers 1 \
     --part_config partition_data/ogbn-products.json \
     --ip_config ip_config.txt \
-    "/home/ubuntu/miniconda3/bin/python train_distdgl_with_sar_inference.py --graph_name ogbn-products --ip_config ip_config.txt --num_epochs 2 --batch_size 1000 ------ -----part_config partition_data/ogbn-products.json"
+    "/home/ubuntu/miniconda3/bin/python train_distdgl_with_sar_inference.py --graph_name ogbn-products --ip_config ip_config.txt --num_epochs 2 --batch_size 1000 --part_config partition_data/ogbn-products.json"
 ```
