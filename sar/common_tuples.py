@@ -124,5 +124,5 @@ class ShardInfo(NamedTuple):
 
 
 class SocketInfo(NamedTuple):
-    nice_name: str
+    name: str
     ip_addr: str

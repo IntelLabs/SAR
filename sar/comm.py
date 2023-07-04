@@ -86,8 +86,8 @@ def dump_ip_address(ip_file: str) -> str:
     
     :returns: A string containing the ip address of the local host
     """
-    scoket = get_socket()
-    host_ip = scoket.ip_addr
+    socket = get_socket()
+    host_ip = socket.ip_addr
     with open(ip_file, 'w', encoding='utf-8') as f_handle:
         f_handle.write(host_ip)
     logger.info(f'wrote ip {host_ip} to file {ip_file}')
@@ -169,13 +169,13 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
     os.environ['MASTER_PORT'] = str(master_port_number)
 
     socket = get_socket()
-    os.environ['TP_SOCKET_IFNAME'] = socket.nice_name
-    os.environ['GLOO_SOCKET_IFNAME'] = socket.nice_name
-    os.environ['CCL_SOCKET_IFNAME'] = socket.nice_name
-    os.environ['NCCL_SOCKET_IFNAME'] = socket.nice_name
+    os.environ['TP_SOCKET_IFNAME'] = socket.name
+    os.environ['GLOO_SOCKET_IFNAME'] = socket.name
+    os.environ['CCL_SOCKET_IFNAME'] = socket.name
+    os.environ['NCCL_SOCKET_IFNAME'] = socket.name
 
-    os.environ['FI_VERBS_IFACE'] = socket.nice_name
-    os.environ['FI_mlx_IFACE'] = socket.nice_name
+    os.environ['FI_VERBS_IFACE'] = socket.name
+    os.environ['FI_mlx_IFACE'] = socket.name
 
     os.environ['MPI_COMM_WORLD'] = str(_world_size)
     os.environ['MPI_COMM_RANK'] = str(_rank)
