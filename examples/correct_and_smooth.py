@@ -12,6 +12,7 @@ from dgl.heterograph import DGLBlock  # type: ignore
 from ogb.nodeproppred import DglNodePropPredDataset
 
 import sar
+from sar.distributed_bn import MeanOp, VarOp, DistributedBN1D
 
 
 parser = ArgumentParser(description="CorrectAndSmooth example")
@@ -99,11 +100,11 @@ class MLP(nn.Module):
         self.linears = nn.ModuleList()
         self.bns = nn.ModuleList()
         self.linears.append(nn.Linear(in_dim, hid_dim))
-        self.bns.append(nn.BatchNorm1d(hid_dim))
+        self.bns.append(DistributedBN1D(hid_dim))
 
         for _ in range(num_layers - 2):
             self.linears.append(nn.Linear(hid_dim, hid_dim))
-            self.bns.append(nn.BatchNorm1d(hid_dim))
+            self.bns.append(DistributedBN1D(hid_dim))
 
         self.linears.append(nn.Linear(hid_dim, out_dim))
         self.dropout = dropout
@@ -317,8 +318,6 @@ def evaluate(logits, labels, masks):
     
     :returns: Tuple of accuracy metrics: train, validation, test
     """
-    import pdb
-    pdb.set_trace()
     results = []
     for indices_name in ['train_indices', 'val_indices', 'test_indices']:
         n_correct = (logits[masks[indices_name]].argmax(1) ==
@@ -335,38 +334,23 @@ def evaluate(logits, labels, masks):
     return train_acc, val_acc, test_acc
 
 
-def data_normalization(features, world_size):
+def data_normalization(features, eps=1.0e-5):
     """
     Perform features normzalization by subtracting theur means and dividing them by their standard deviations.
     Each position in features vector is normzalized independently. To calculate means and stds over whole
     dataset, workers must communicate with each other.
 
-
     :param features: Dataset's features
     :type features: Tensor
-    :param world_size: Number of workers. The same as the number of graph partitions
-    :type world_size: int
+    :param eps: a value added to the variance for numerical stability 
+    :type eps: float
     
     :returns: Normalized Tensor of features
     """
-    local_means = features.mean(0)
-    workers_means = sar.comm.exchange_tensors([local_means] * world_size)
-    workers_means = torch.stack(workers_means, dim=0)
-    
-    local_feature_size = features.shape[0]
-    workers_feature_sizes = sar.comm.exchange_tensors([torch.tensor([local_feature_size])] * world_size)
-    workers_feature_sizes = torch.stack(workers_feature_sizes, dim=0)
-    
-    global_features_sum = torch.mul(workers_means, workers_feature_sizes).sum(dim=0)
-    global_feature_size = workers_feature_sizes.sum()
-    global_means = global_features_sum / global_feature_size
-    
-    local_std_numerator = torch.pow(features - global_means, 2).sum(dim=0)
-    workers_std_numerators = sar.comm.exchange_tensors([local_std_numerator] * world_size)
-    workers_std_numerators = torch.stack(workers_std_numerators, dim=0)
-    global_stds = torch.sqrt(workers_std_numerators.sum(dim=0) / global_feature_size)
-    
-    features = (features - global_means) / global_stds
+    mean = MeanOp.apply(features)
+    var = VarOp.apply(features)
+    std = torch.sqrt(var - mean**2 + eps)
+    features = (features - mean) / std
     return features
 
 
