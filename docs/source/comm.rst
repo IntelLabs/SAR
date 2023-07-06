@@ -4,7 +4,7 @@
 
 SAR's communication routines
 =============================
-SAR uses only two types of collective communication calls: ``all_to_all`` and ``all_reduce``. This choice was made to improve scalability by avoiding any point-to-point communication. Currently, the only backends in `torch.distributed <https://pytorch.org/docs/stable/distributed.html>`_ that support ``all_to_all`` are ``nccl``, ``ccl``, or ``mpi``.  Nvidia's ``nccl`` is already included in the PyTorch distribution and it is the natural choice when training on GPUs.
+SAR uses only two types of collective communication calls: ``all_to_all`` and ``all_reduce``. This choice was made to improve scalability by avoiding any point-to-point communication. SAR supports four backends, which are ``ccl``, ``nccl``, ``mpi`` and ``gloo``. Nvidia's ``nccl`` is already included in the PyTorch distribution and it is the natural choice when training on GPUs.
 
 The ``ccl`` backend uses `Intel's OneCCL <https://www.intel.com/content/www/us/en/developer/tools/oneapi/oneccl.html>`_ library. You can install the PyTorch bindings for OneCCL `here <https://github.com/intel/torch-ccl>`_ .  ``ccl`` is the preferred backend when training on CPUs.
 

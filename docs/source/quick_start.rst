@@ -66,7 +66,7 @@ Initialize the communication through a call to :func:`sar.initialize_comms` , sp
   
 .. 
 
-``backend_name`` can be ``nccl``, ``ccl``, or ``mpi``.
+``backend_name`` can be ``ccl``, ``nccl``, ``mpi`` or ``gloo``.
 
 
 
