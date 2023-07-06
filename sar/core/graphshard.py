@@ -82,13 +82,7 @@ class GraphShard:
         self.unique_tgt_nodes, unique_tgt_nodes_inverse = \
             torch.unique(shard_edges_features.edges[1], return_inverse=True)
 
-        edges_src_nodes = torch.arange(self.unique_src_nodes.size(0))[
-            unique_src_nodes_inverse]
-
-        edges_tgt_nodes = torch.arange(self.unique_tgt_nodes.size(0))[
-            unique_tgt_nodes_inverse]
-
-        self.graph = dgl.create_block((edges_src_nodes, edges_tgt_nodes),
+        self.graph = dgl.create_block((unique_src_nodes_inverse, unique_tgt_nodes_inverse),
                                       num_src_nodes=self.unique_src_nodes.size(
                                           0),
                                       num_dst_nodes=self.unique_tgt_nodes.size(
