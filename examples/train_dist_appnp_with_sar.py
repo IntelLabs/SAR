@@ -163,7 +163,7 @@ def main():
     features = sar.suffix_key_lookup(partition_data.node_features, 'feat').to(device)
     full_graph_manager = sar.construct_full_graph(partition_data).to(device)
 
-    #We do not need the partition data anymore
+    # We do not need the partition data anymore
     del partition_data
 
     gnn_model = APPNP(
