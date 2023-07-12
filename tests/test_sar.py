@@ -1,10 +1,11 @@
-from utils import *
+from multiprocessing_utils import *
 import os
 import tempfile
-
+import traceback
 import numpy as np
 # Do not import DGL and SAR - these modules should be
 # independently loaded inside each process
+
 
 def sar_process(mp_dict, rank, world_size, tmp_dir):
     """
@@ -53,7 +54,7 @@ def sar_process(mp_dict, rank, world_size, tmp_dir):
         features = sar.suffix_key_lookup(partition_data.node_features, 'features')
         del partition_data
 
-        model = GNNModel(features.size(1), 32, features.size(1)).to('cpu')
+        model = GNNModel(features.size(1), features.size(1)).to('cpu')
         sar.sync_params(model)
 
         logits = model(full_graph_manager, features)
