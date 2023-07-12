@@ -151,7 +151,7 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
 
     """
     assert backend in ['ccl', 'nccl',
-                       'mpi'], 'backend must be ccl,nccl, or mpi'
+                       'mpi'], 'backend must be ccl, nccl, or mpi'
     if _comm_device is None:
         if backend == 'nccl':
             _comm_device = torch.device('cuda')
@@ -163,34 +163,44 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
 
     if backend == 'ccl':
         # pylint: disable=unused-import
-        import torch_ccl  # type: ignore
+        try:
+            import oneccl_bindings_for_pytorch   # type: ignore
+        except:
+            try:
+                import torch_ccl  # type: ignore
+            except:
+                raise ImportError("None of the oneccl_bindings_for_pytorch and torch_ccl package has been found")
 
-    os.environ['MASTER_ADDR'] = master_ip_address
-    os.environ['MASTER_PORT'] = str(master_port_number)
+    if not dist.is_initialized():
+        os.environ['MASTER_ADDR'] = master_ip_address
+        os.environ['MASTER_PORT'] = str(master_port_number)
 
-    socket = get_socket()
-    os.environ['TP_SOCKET_IFNAME'] = socket.name
-    os.environ['GLOO_SOCKET_IFNAME'] = socket.name
-    os.environ['CCL_SOCKET_IFNAME'] = socket.name
-    os.environ['NCCL_SOCKET_IFNAME'] = socket.name
+        socket = get_socket()
+        os.environ['TP_SOCKET_IFNAME'] = socket.name
+        os.environ['GLOO_SOCKET_IFNAME'] = socket.name
+        os.environ['CCL_SOCKET_IFNAME'] = socket.name
+        os.environ['NCCL_SOCKET_IFNAME'] = socket.name
 
-    os.environ['FI_VERBS_IFACE'] = socket.name
-    os.environ['FI_mlx_IFACE'] = socket.name
+        os.environ['FI_VERBS_IFACE'] = socket.name
+        os.environ['FI_mlx_IFACE'] = socket.name
 
-    os.environ['MPI_COMM_WORLD'] = str(_world_size)
-    os.environ['MPI_COMM_RANK'] = str(_rank)
+        os.environ['MPI_COMM_WORLD'] = str(_world_size)
+        os.environ['MPI_COMM_RANK'] = str(_rank)
 
-    os.environ['OMPI_COMM_WORLD'] = str(_world_size)
-    os.environ['OMPI_COMM_RANK'] = str(_rank)
+        os.environ['OMPI_COMM_WORLD'] = str(_world_size)
+        os.environ['OMPI_COMM_RANK'] = str(_rank)
 
-    os.environ['IMPI_COMM_WORLD'] = str(_world_size)
-    os.environ['IMPI_COMM_RANK'] = str(_rank)
+        os.environ['IMPI_COMM_WORLD'] = str(_world_size)
+        os.environ['IMPI_COMM_RANK'] = str(_rank)
 
-    os.environ['I_MPI_COMM_WORLD'] = str(_world_size)
-    os.environ['I_MPI_COMM_RANK'] = str(_rank)
+        os.environ['I_MPI_COMM_WORLD'] = str(_world_size)
+        os.environ['I_MPI_COMM_RANK'] = str(_rank)
 
-    dist.init_process_group(
-        backend=backend, rank=_rank, world_size=_world_size)
+        dist.init_process_group(
+             backend=backend, rank=_rank, world_size=_world_size)
+    else:
+        assert dist.get_backend() in ['ccl', 'nccl',
+                       'mpi'], 'backend must be ccl, nccl, or mpi'
 
     _CommData.rank = _rank
     _CommData.world_size = _world_size

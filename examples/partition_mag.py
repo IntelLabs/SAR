@@ -72,7 +72,6 @@ def main():
         args.num_partitions,
         args.partition_out_path,
         num_hops=1,
-        reshuffle=True,
         balance_edges=True)
 
 

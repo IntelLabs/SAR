@@ -25,7 +25,7 @@ import logging
 import torch
 import dgl  # type: ignore
 from dgl.heterograph import DGLBlock  # type: ignore
-from dgl.heterograph import DGLHeteroGraph as DGLGraph  # type: ignore
+from dgl.heterograph import DGLGraph  # type: ignore
 
 from dgl.sampling import sample_neighbors  # type: ignore
 import dgl.partition  # type:ignore
