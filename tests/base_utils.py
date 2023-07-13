@@ -1,9 +1,11 @@
-
 import os
 import sar
 import torch
 import torch.distributed as dist
 import dgl
+# IMPORTANT - This module should be imported independently
+# only by the child processes - i.e. separate workers
+ 
 
 
 def initialize_worker(rank, world_size, tmp_dir):
