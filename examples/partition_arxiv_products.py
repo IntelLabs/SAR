@@ -85,7 +85,6 @@ def main():
         args.num_partitions,
         args.partition_out_path,
         num_hops=1,
-        reshuffle=True,
         balance_ntypes=train_mask,
         balance_edges=True)
 

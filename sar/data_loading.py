@@ -87,27 +87,37 @@ def _get_type_ordered_edges(edge_mask: Tensor, edge_types: Tensor,
     return torch.cat(reordered_edge_mask)
 
 
-def load_dgl_partition_data(partition_json_file: str,
-                            own_partition_idx: int, device: torch.device) -> PartitionData:
+def create_partition_data(graph: dgl.DGLGraph,
+                          own_partition_idx: int,
+                          node_features: Dict[str, torch.Tensor],
+                          edge_features: Dict[str, Tensor],
+                          partition_book: dgl.distributed.GraphPartitionBook,
+                          node_type_list: List[str],
+                          edge_type_list: List[str],
+                          device: torch.device) -> PartitionData:
     """
-    Loads partition data created by DGL's ``partition_graph`` function
+    Creates SAR's PartitionData object basing on graph partition and features.
 
-    :param partition_json_file: Path to the .json file containing partitioning data
-    :type partition_json_file: str
-    :param own_partition_idx: The index of the partition to load. This is typically the\
+    :param graph: The graph partition structure for specific ``own_partition_idx``
+    :type graph: dgl.DGLGraph
+    :param own_partition_idx: The index of the partition to create. This is typically the\
     worker/machine rank
     :type own_partition_idx: int
+    :param node_features: Dictionary containing node features for graph partition
+    :type node_features: Dict[str, Tensor]
+    :param edge_features: Dictionary containing edge features for graph partition
+    :type edge_features: Dict[(str, str, str), Tensor]
+    :param partition_book: The graph partition information
+    :type partition_book: dgl.distributed.GraphPartitionBook
+    :param node_type_list: List of node types
+    :type node_type_list: List[str]
+    :param edge_type_list: List of edge types
+    :type edge_type_list: List[str]
     :param device: Device on which to place the loaded partition data
     :type device: torch.device
     :returns: The loaded partition data
-
     """
-    (graph, node_features,
-     edge_features, partition_book, _,
-     node_type_list, edge_type_list) = load_partition(partition_json_file, own_partition_idx)
-
     is_heterogeneous = (len(edge_type_list) > 1)
-
     # Delete redundant edge features with keys {relation name}/reltype. graph.edata[dgl.ETYPE ] already contains
     # the edge type in a heterogeneous graph
     if is_heterogeneous:
@@ -165,3 +175,63 @@ def load_dgl_partition_data(partition_json_file: str,
                          node_type_list,
                          edge_type_list
                          )
+
+
+def load_dgl_partition_data(partition_json_file: str,
+                            own_partition_idx: int, device: torch.device) -> PartitionData:
+    """
+    Loads partition data created by DGL's ``partition_graph`` function
+
+    :param partition_json_file: Path to the .json file containing partitioning data
+    :type partition_json_file: str
+    :param own_partition_idx: The index of the partition to load. This is typically the\
+    worker/machine rank
+    :type own_partition_idx: int
+    :param device: Device on which to place the loaded partition data
+    :type device: torch.device
+    :returns: The loaded partition data
+
+    """
+    (graph, node_features,
+     edge_features, partition_book, _,
+     node_type_list, edge_type_list) = load_partition(partition_json_file, own_partition_idx)
+
+    return create_partition_data(graph, own_partition_idx,
+                                 node_features, edge_features,
+                                 partition_book, node_type_list,
+                                 edge_type_list, device)
+
+def load_dgl_partition_data_from_graph(graph: dgl.distributed.DistGraph,
+                                       device: torch.device) -> PartitionData:
+    """
+    Loads partition data from DistGraph object
+
+    :param graph: The distributed graph
+    :type graph: dgl.distributed.DistGraph
+    :param device: Device on which to place the loaded partition data
+    :type device: torch.device
+    :returns: The loaded partition data
+
+    """
+    own_partition_idx = graph.rank()
+    local_g = graph.local_partition
+
+    assert dgl.NID in local_g.ndata
+    assert dgl.EID in local_g.edata
+
+    # get originalmapping for node and edge ids
+    orig_n_ids = local_g.ndata[dgl.NID][local_g.ndata['inner_node'].bool().nonzero().view(-1)]
+    orig_e_ids = local_g.edata[dgl.EID][local_g.edata['inner_edge'].bool().nonzero().view(-1)]
+
+    # fetch local features from DistTensor
+    node_features = {key : torch.Tensor(graph.ndata[key][orig_n_ids]) for key in list(graph.ndata.keys())}
+    edge_features = {key : torch.Tensor(graph.edata[key][orig_e_ids]) for key in list(graph.edata.keys())}
+
+    partition_book = graph.get_partition_book()
+    node_type_list = local_g.ntypes
+    edge_type_list = [local_g.to_canonical_etype(etype) for etype in graph.etypes]
+
+    return create_partition_data(local_g, own_partition_idx,
+                                 node_features, edge_features,
+                                 partition_book, node_type_list,
+                                 edge_type_list, device)

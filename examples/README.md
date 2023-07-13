@@ -30,6 +30,19 @@ python3 train_homogeneous_sampling_basic.py --partitioning-json-file /path/to/pa
 
 ```
 
+## Distributed Mini-Batch Training with Full-Graph inference
+The script ``train_distdgl_with_sar_inference.py`` showcases how SAR can be effectively combined with native DGL distributed training. In this particular example, the training process utilizes a sampling approach, while the evaluation phase leverages the SAR library to perform computations on the entire graph.
+```shell
+python /home/ubuntu/workspace/dgl/tools/launch.py \
+    --workspace /home/ubuntu/workspace/SAR/examples \
+    --num_trainers 1 \
+    --num_samplers 2 \
+    --num_servers 1 \
+    --part_config partition_data/ogbn-products.json \
+    --ip_config ip_config.txt \
+    "/home/ubuntu/miniconda3/bin/python train_distdgl_with_sar_inference.py --graph_name ogbn-products --ip_config ip_config.txt --num_epochs 2 --batch_size 1000 --part_config partition_data/ogbn-products.json"
+```
+
 ## Correct and Smooth
 Example taken from [DGL implemenetation](https://github.com/dmlc/dgl/tree/master/examples/pytorch/correct_and_smooth) of C&S. Code is adjusted to perform distributed training with SAR. For instance, you can run the example with following commands:
 
@@ -41,4 +54,3 @@ python correct_and_smooth.py --partitioning-json-file /path/to/partitioning/grap
 * **Plain Linear + C&S**
 ```shell
 python correct_and_smooth.py --partitioning-json-file /path/to/partitioning/graph_name.json --ip-file /path/to/ip_file --rank 0 --world-size 2 --model linear --dropout 0.5 --epochs 1000 --correction-alpha 0.87 --smoothing-alpha 0.81 --correction-adj AD --autoscale
-```
