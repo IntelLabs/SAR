@@ -257,7 +257,9 @@ class CorrectAndSmooth(nn.Module):
                 int(mask.sum()) if mask.dtype == torch.bool else mask.size(0)
             )
             assert y_true.size(0) == numel
-
+            numel = torch.tensor(numel)
+            sar.comm.all_reduce(numel, dist.ReduceOp.SUM, move_to_comm_device=True)
+            
             if y_true.dtype == torch.long:
                 y_true = F.one_hot(y_true.view(-1), y_soft.size(-1)).to(
                     y_soft.dtype
@@ -270,7 +272,9 @@ class CorrectAndSmooth(nn.Module):
                 smoothed_error = self.prop1(
                     g, error, post_step=lambda x: x.clamp_(-1.0, 1.0)
                 )
-                sigma = error[mask].abs().sum() / numel
+                error_sum = error[mask].abs().sum()
+                sar.comm.all_reduce(error_sum, dist.ReduceOp.SUM, move_to_comm_device=True)
+                sigma = error_sum / numel
                 scale = sigma / smoothed_error.abs().sum(dim=1, keepdim=True)
                 scale[scale.isinf() | (scale > 1000)] = 1.0
 
