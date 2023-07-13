@@ -19,13 +19,15 @@ def handle_mp_exception(mp_dict):
     pytest.fail(str(msg), pytrace=False)
 
 
-def run_workers(func, world_size):
+def run_workers(func, world_size, *args, **kwargs):
     """
     Starts `world_size` number of processes, where each of them
     behaves as a separate worker and invokes function specified 
     by the parameter.
     
-    :param func: The function that will be invoked by each process
+    :param func: The function that will be invoked by each process. It should take four
+    parameters: mp_dict - shared dictionary between different processes, rank - of the current machine,
+    world_size - number of workers, tmp_dir - path to the working directory (additionaly one can pass args and kwargs)
     :type func: function
     :returns: mp_dict which can be used by workers to return
     results from `func`
@@ -35,12 +37,13 @@ def run_workers(func, world_size):
     processes = []
     with tempfile.TemporaryDirectory() as tmp_dir:
         for rank in range(1, world_size):
-            p = mp.Process(target=func, args=(mp_dict, rank, world_size, tmp_dir))
+            my_args = (mp_dict, rank, world_size, tmp_dir) + args
+            p = mp.Process(target=func, args=my_args, kwargs=kwargs)
             p.daemon = True
             p.start()
             processes.append(p)
-        func(mp_dict, 0, world_size, tmp_dir)
-            
+        func(mp_dict, 0, world_size, tmp_dir, *args, **kwargs)
+        
         for p in processes:
             p.join()
         if 'exception' in mp_dict:
