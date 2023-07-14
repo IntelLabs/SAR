@@ -114,7 +114,7 @@ def test_sar_full_graph(world_size):
 
         sar_logits_mean = sar_logits.mean()
 
-        rtol = sar_logits_mean / 1000
+        rtol = abs(sar_logits_mean) / 1000
         assert full_graph_mean == pytest.approx(sar_logits_mean, rtol)
 
 @sar_test
