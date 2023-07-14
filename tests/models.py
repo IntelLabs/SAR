@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn
 
 class GNNModel(nn.Module):
-    def __init__(self,  in_dim: int, hidden_dim: int, out_dim: int):
+    def __init__(self,  in_dim: int, out_dim: int):
         super().__init__()
 
         self.convs = nn.ModuleList([

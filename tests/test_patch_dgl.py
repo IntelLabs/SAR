@@ -1,6 +1,7 @@
-from utils import *
+from multiprocessing_utils import *
 # Do not import DGL and SAR - these modules should be
 # independently loaded inside each process
+
 
 @sar_test
 def test_patch_dgl():
