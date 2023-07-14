@@ -24,6 +24,8 @@ In an environment with a networked file system, initializing ``torch.distributed
 
 :func:`sar.nfs_ip_init` communicates the master's ip address to the workers through the file system. In the absence of a networked file system, you should develop your own mechanism to communicate the master's ip address.
 
+You can specify the name of the socket that will be used for communication with `SAR_SOCKET_NAME` environment variable (if not specified, the first available socket will be selected).
+
       
   
 Relevant methods
