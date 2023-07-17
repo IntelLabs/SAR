@@ -32,20 +32,21 @@ SUPPORTED_DATASETS = {
     "cora": CoraGraphDataset,
     "citeseer": CiteseerGraphDataset,
     "pubmed": PubmedGraphDataset,
+    'reddit': RedditDataset,
     "ogbn-products": DglNodePropPredDataset,
     "ogbn-arxiv": DglNodePropPredDataset,
     "ogbn-mag": DglNodePropPredDataset,
 }
 
-parser = ArgumentParser(description="Graph partitioning for ogbn-arxiv and ogbn-products")
+parser = ArgumentParser(description="Graph partitioning for common graph datasets")
 
 parser.add_argument("--dataset-root", type=str, default="./datasets/",
                     help="The OGB datasets folder")
 
 parser.add_argument("--dataset-name", type=str, default="ogbn-arxiv",
-                    choices=["ogbn-arxiv", "ogbn-products", "ogbn-mag",
-                             "cora", "citeseer", "pubmed"],
-                    help="Dataset name. ogbn-arxiv or ogbn-products")
+                    choices=['ogbn-arxiv', 'ogbn-products', 'ogbn-mag',
+                            'cora', 'citeseer', 'pubmed', 'reddit'],
+                    help="Dataset name")
 
 parser.add_argument("--partition-out-path", type=str, default="./partition_data/",
                     help="Path to the output directory for the partition data")
@@ -57,12 +58,14 @@ def get_dataset(args):
     dataset_name = args.dataset_name
     if dataset_name in ["cora", "citeseer", "pubmed"]:
         return SUPPORTED_DATASETS[dataset_name](args.dataset_root)
+    elif dataset_name == 'reddit':
+        return SUPPORTED_DATASETS[dataset_name](self_loop=True, raw_dir=args.dataset_root)
     else:
         return SUPPORTED_DATASETS[dataset_name](dataset_name, args.dataset_root)
 
 def prepare_features(args, dataset, graph):
-    if args.dataset_name in ["cora", "citeseer", "pubmed"]:
-        assert all([x in graph.ndata.keys() for x in ["train_mask", "val_mask", "test_mask"]])
+    if args.dataset_name in ['cora', 'citeseer', 'pubmed', 'reddit']:
+        assert all([x in graph.ndata.keys() for x in ['train_mask', 'val_mask', 'test_mask']])
         return
 
     split_idx = dataset.get_idx_split()
