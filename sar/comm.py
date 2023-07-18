@@ -294,7 +294,8 @@ def all_to_all(recv_tensors: List[torch.Tensor], send_tensors: List[torch.Tensor
 
 def all_reduce(red_tensor: torch.Tensor, op: dist.ReduceOp,
                move_to_comm_device: bool = False):   # pylint: disable=invalid-name
-    """ wrapper around dist.all_reduce
+    """
+    Wrapper around dist.all_reduce
 
     :param red_tensor: reduction tensor
     :type red_tensor: torch.Tensor
@@ -302,8 +303,6 @@ def all_reduce(red_tensor: torch.Tensor, op: dist.ReduceOp,
     :type op: dist.ReduceOp
     :param move_to_comm_device: Move to comm device or not
     :type move_to_comm_device: bool
-
-
     """
 
     if move_to_comm_device:
@@ -315,6 +314,16 @@ def all_reduce(red_tensor: torch.Tensor, op: dist.ReduceOp,
 
 
 def all_to_all_rounds(recv_tensors: List[torch.Tensor], send_tensors: List[torch.Tensor]):
+    """
+    All_to_all wrapper which breaks down the collective call into multiple
+    torch.distributed.all_to_all calls so that the size of the data in each
+    call is below Config.max_collective_size
+    
+    :param recv_tensors: List of tensors to receive from other workers
+    :type recv_tensors: List[torch.Tensor]
+    :param send_tensors: List of tensor to send to other workers
+    :type send_tensors: List[torch.Tensor]
+    """
     if Config.max_collective_size == 0:
         all_to_all_gloo_support(recv_tensors, send_tensors)
     else:
@@ -334,6 +343,16 @@ def all_to_all_rounds(recv_tensors: List[torch.Tensor], send_tensors: List[torch
 
 
 def all_to_all_gloo_support(recv_tensors: List[torch.Tensor], send_tensors: List[torch.Tensor]):
+    """
+    Since gloo backend doesn't support all_to_all function, SAR implements it
+    with multiple asynchronous sends (torch.dist.isend). For every other backend
+    torch.dist.all_to_all is used.
+
+    :param recv_tensors: List of tensors to receive from other workers
+    :type recv_tensors: List[torch.Tensor]
+    :param send_tensors: List of tensor to send to other workers
+    :type send_tensors: List[torch.Tensor]
+    """
     if backend() == 'gloo':
         send_requests = []
         for i in range(world_size()):
