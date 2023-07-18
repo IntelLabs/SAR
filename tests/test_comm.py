@@ -107,4 +107,4 @@ def test_all_to_all(world_size, backend):
     mp_dict = run_workers(all_to_all, world_size, backend=backend)
     for rank in range(world_size):
         for tensor in mp_dict[f"result_{rank}"]:
-            assert torch.all(torch.eq(tensor, torch.tensor([rank]*world_size)))
+            assert torch.all(torch.eq(tensor, torch.tensor([rank] * world_size)))
