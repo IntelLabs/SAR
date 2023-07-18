@@ -44,13 +44,28 @@ python /home/ubuntu/workspace/dgl/tools/launch.py \
 ```
 
 ## Correct and Smooth
-Example taken from [DGL implemenetation](https://github.com/dmlc/dgl/tree/master/examples/pytorch/correct_and_smooth) of C&S. Code is adjusted to perform distributed training with SAR. For instance, you can run the example with following commands:
+Example taken from [DGL implemenetation](https://github.com/dmlc/dgl/tree/master/examples/pytorch/correct_and_smooth) of C&S. Code is adjusted to perform distributed training with SAR. Introduced modifications change the way data normalization is performed - workers need to communicate with each other to calculate mean and standard deviation for the entire dataset (not just their partition). Moreover, workers need to be synchronized with each other to calculate sigma value required during "correct" phase.
+
+For instance, you can run the example with following commands (2 machines scenario):
 
 * **Plain MLP + C&S**
-```shell
-python correct_and_smooth.py --partitioning-json-file /path/to/partitioning/graph_name.json --ip-file /path/to/ip_file --rank 0 --world-size 2 --dropout 0.5 --correction-adj DA --smoothing-adj AD --autoscale
-```
+    * Rank 0 machine:
+    ```shell
+    python correct_and_smooth.py --partitioning-json-file /path/to/partitioning/graph_name.json --ip-file /path/to/ip_file --rank 0 --world-size 2 --dropout 0.5 --correction-adj DA --smoothing-adj AD --autoscale
+    ```
+
+    * Rank 1 machine:
+    ```shell
+    python correct_and_smooth.py --partitioning-json-file /path/to/partitioning/graph_name.json --ip-file /path/to/ip_file --rank 1 --world-size 2 --dropout 0.5 --correction-adj DA --smoothing-adj AD --autoscale
+    ```
 
 * **Plain Linear + C&S**
-```shell
-python correct_and_smooth.py --partitioning-json-file /path/to/partitioning/graph_name.json --ip-file /path/to/ip_file --rank 0 --world-size 2 --model linear --dropout 0.5 --epochs 1000 --correction-alpha 0.87 --smoothing-alpha 0.81 --correction-adj AD --autoscale
+    * Rank 0 machine:
+    ```shell
+    python correct_and_smooth.py --partitioning-json-file /path/to/partitioning/graph_name.json --ip-file /path/to/ip_file --rank 0 --world-size 2 --model linear --dropout 0.5 --epochs 1000 --correction-alpha 0.87 --smoothing-alpha 0.81 --correction-adj AD --autoscale
+    ```
+
+    * Rank 1 machine:
+    ```shell
+    python correct_and_smooth.py --partitioning-json-file /path/to/partitioning/graph_name.json --ip-file /path/to/ip_file --rank 1 --world-size 2 --model linear --dropout 0.5 --epochs 1000 --correction-alpha 0.87 --smoothing-alpha 0.81 --correction-adj AD --autoscale
+    ```
