@@ -8,7 +8,7 @@ import dgl
  
 
 
-def initialize_worker(rank, world_size, tmp_dir):
+def initialize_worker(rank, world_size, tmp_dir, backend="ccl"):
     """
     Boilerplate code for setting up connection between workers
     
@@ -22,7 +22,7 @@ def initialize_worker(rank, world_size, tmp_dir):
     torch.seed()
     ip_file = os.path.join(tmp_dir, 'ip_file')
     master_ip_address = sar.nfs_ip_init(rank, ip_file)
-    sar.initialize_comms(rank, world_size, master_ip_address, 'ccl')
+    sar.initialize_comms(rank, world_size, master_ip_address, backend)
 
 
 def get_random_graph():
