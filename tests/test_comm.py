@@ -5,9 +5,10 @@ from multiprocessing_utils import *
 # independently loaded inside each process
 
 
+@pytest.mark.parametrize("backend", ["ccl", "gloo"])
 @pytest.mark.parametrize('world_size', [2, 4, 8])
 @sar_test
-def test_sync_params(world_size):
+def test_sync_params(world_size, backend):
     """
     Checks whether model's parameters are the same across all
     workers after calling sync_params function. Parameters of worker 0
@@ -15,12 +16,12 @@ def test_sync_params(world_size):
     sync_params should be the same
     """
     import torch
-    def sync_params(mp_dict, rank, world_size, tmp_dir):
+    def sync_params(mp_dict, rank, world_size, tmp_dir, **kwargs):
         import sar
         from tests.base_utils import initialize_worker
         from models import GNNModel
         try:
-            initialize_worker(rank, world_size, tmp_dir)
+            initialize_worker(rank, world_size, tmp_dir, backend=kwargs["backend"])
             model = GNNModel(16, 4)
             if rank == 0:   
                 mp_dict[f"result_{rank}"] = deepcopy(model.state_dict())
@@ -31,21 +32,22 @@ def test_sync_params(world_size):
             mp_dict["traceback"] = str(traceback.format_exc())
             mp_dict["exception"] = e
         
-    mp_dict = run_workers(sync_params, world_size)
+    mp_dict = run_workers(sync_params, world_size, backend=backend)
     for rank in range(1, world_size):
         for key in mp_dict[f"result_0"].keys():
             assert torch.all(torch.eq(mp_dict[f"result_0"][key], mp_dict[f"result_{rank}"][key]))
         
     
+@pytest.mark.parametrize("backend", ["ccl", "gloo"])
 @pytest.mark.parametrize('world_size', [2, 4, 8])
 @sar_test
-def test_gather_grads(world_size):
+def test_gather_grads(world_size, backend):
     """
     Checks whether parameter's gradients are the same across all
     workers after calling gather_grads function 
     """
     import torch
-    def gather_grads(mp_dict, rank, world_size, tmp_dir):
+    def gather_grads(mp_dict, rank, world_size, tmp_dir, **kwargs):
         import sar
         import dgl
         import torch.nn.functional as F
@@ -53,7 +55,7 @@ def test_gather_grads(world_size):
         from base_utils import initialize_worker, get_random_graph, synchronize_processes,\
             load_partition_data
         try:
-            initialize_worker(rank, world_size, tmp_dir)
+            initialize_worker(rank, world_size, tmp_dir, backend=kwargs["backend"])
             graph_name = 'dummy_graph'
             if rank == 0:
                 g = get_random_graph()
@@ -73,7 +75,7 @@ def test_gather_grads(world_size):
             mp_dict["traceback"] = str(traceback.format_exc())
             mp_dict["exception"] = e
         
-    mp_dict = run_workers(gather_grads, world_size)
+    mp_dict = run_workers(gather_grads, world_size, backend=backend)
     for rank in range(1, world_size):
         for i in range(len(mp_dict["result_0"])):
             assert torch.all(torch.eq(mp_dict["result_0"][i], mp_dict[f"result_{rank}"][i]))
