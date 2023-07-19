@@ -1,8 +1,11 @@
 ## Graph partitioning
 
-``partition_arxiv_products.py`` partitions the ogbn-arxiv and ogbn-products  graphs from the [Open Graph Benchmarks](https://ogb.stanford.edu/) using DGL's metis-based partitioning. The general technique there can be used to partition arbitrary homogeneous graphs. Note that all node-related information must be included in the graph's ``ndata`` dictionary so that they are correctly partitioned with the graph. Similarly, edge-related information must be included in the graph's ``edata`` dictionary
+The ``partition_graph.py`` script can be used to partition both homogeneous and heterogeneous graphs. It utilizes DGL's metis-based partitioning algorithm to divide the graphs into smaller partitions. Note that all node-related information must be included in the graph's ``ndata`` dictionary so that they are correctly partitioned with the graph.
+Similarly, edge-related information must be included in the graph's ``edata`` dictionary
 
-``partition_mag.py`` partitions the [ogbn-mag](https://ogb.stanford.edu/docs/nodeprop/#ogbn-mag) heterogeneous graph. Again, all node-related information are included in the graph's ``ndata`` for the relevant node types
+### Supported datasets:
+- ogbn-products, ogbn-arxiv, ogb-mag from [Open Graph Benchmarks](https://ogb.stanford.edu/)
+- cora, citeseer, pubmed
 
 ## Full-batch Training
 
