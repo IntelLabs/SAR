@@ -158,9 +158,6 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
         else:
             _comm_device = torch.device('cpu')
 
-#    if is_initialized():
- #       return
-
     if backend == 'ccl':
         # pylint: disable=unused-import
         try:
@@ -195,9 +192,13 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
 
         os.environ['I_MPI_COMM_WORLD'] = str(_world_size)
         os.environ['I_MPI_COMM_RANK'] = str(_rank)
-
-        dist.init_process_group(
-             backend=backend, rank=_rank, world_size=_world_size)
+        try:
+            dist.init_process_group(
+                backend=backend, rank=_rank, world_size=_world_size)
+        except:
+            logger.error("SAR was unable to initialize torch.distributed process group. "
+                         "You can try to do it manually before calling sar.initialize_comms")
+            raise
     else:
         assert dist.get_backend() in ['ccl', 'nccl',
                        'mpi'], 'backend must be ccl, nccl, or mpi'
