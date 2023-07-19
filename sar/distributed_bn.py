@@ -24,6 +24,7 @@ from torch import Tensor
 import torch.distributed as dist
 from torch import nn
 from torch.nn import Parameter
+from torch.nn import init
 from .comm import all_reduce, comm_device, is_initialized
 
 
@@ -51,6 +52,7 @@ class DistributedBN1D(nn.Module):
         self.n_feats = n_feats
         self.weight: Optional[Parameter]
         self.bias: Optional[Parameter]
+        self.affine = affine
         if affine:
             self.weight = Parameter(torch.ones(n_feats))
             self.bias = Parameter(torch.zeros(n_feats))
@@ -83,6 +85,11 @@ class DistributedBN1D(nn.Module):
         else:
             result = normalized_x
         return result
+    
+    def reset_parameters(self):
+        if self.affine:
+            init.ones_(self.weight)
+            init.zeros_(self.bias)
 
 
 
