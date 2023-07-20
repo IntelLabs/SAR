@@ -20,7 +20,7 @@ parser.add_argument("--ip-file", type=str, default="./ip_file",
                     help="File with ip-address. Worker 0 creates this file and all others read it")
 
 parser.add_argument("--backend", type=str, default="nccl",
-                    choices=["ccl", "nccl", "mpi"],
+                    choices=["ccl", "nccl", "mpi", "gloo"],
                     help="Communication backend to use")
 
 parser.add_argument("--cpu-run", action="store_true",
