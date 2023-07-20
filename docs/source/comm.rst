@@ -16,12 +16,12 @@ In an environment with a networked file system, initializing ``torch.distributed
       comm_device = torch.device('cuda')
   else:
       comm_device = torch.device('cpu')
-  
-  master_ip_address = sar.nfs_ip_init(rank,path_to_ip_file)
-  sar.initialize_comms(rank,world_size, master_ip_address,backend_name,comm_device)
+
+  master_ip_address = sar.nfs_ip_init(rank, path_to_ip_file)
+  sar.initialize_comms(rank, world_size, master_ip_address, backend_name, comm_device)
 
 ..
-
+:func:`sar.initialize_comms` tries to initialize the torch.distributed process group, but only if it has not been initialized. User can initialize process group on his own before calling :func:`sar.initialize_comms`.
 :func:`sar.nfs_ip_init` communicates the master's ip address to the workers through the file system. In the absence of a networked file system, you should develop your own mechanism to communicate the master's ip address.
 
 You can specify the name of the socket that will be used for communication with `SAR_SOCKET_NAME` environment variable (if not specified, the first available socket will be selected).

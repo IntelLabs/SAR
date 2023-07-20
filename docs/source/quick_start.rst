@@ -61,8 +61,8 @@ Initialize the communication through a call to :func:`sar.initialize_comms` , sp
       comm_device = torch.device('cuda')
   else:
       comm_device = torch.device('cpu')
-  master_ip_address = sar.nfs_ip_init(rank,path_to_ip_file)
-  sar.initialize_comms(rank,world_size, master_ip_address,backend_name,comm_device)
+  master_ip_address = sar.nfs_ip_init(rank, path_to_ip_file)
+  sar.initialize_comms(rank, world_size, master_ip_address, backend_name, comm_device)
   
 .. 
 
