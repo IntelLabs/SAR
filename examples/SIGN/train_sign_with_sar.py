@@ -27,7 +27,7 @@ def load_dataset(filename, rank, device):
             as_tuple=False).view(-1).to(device)
     print(partition_data.node_features.keys())
 
-    label_name, feature_name = ('feat', 'label') if 'reddit' in filename \
+    feature_name, label_name = ('feat', 'label') if 'reddit' in filename \
                                                  else ('features', 'labels')
     labels = sar.suffix_key_lookup(partition_data.node_features,
                                    label_name).long().to(device)
@@ -224,14 +224,7 @@ def main(args):
         args.R,
         args.ff_layer,
         args.dropout,
-    )
-    model = model.to(device)
-    if args.gpu == -1:
-        model = torch.nn.parallel.DistributedDataParallel(model)
-    else:
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[device], output_device=device
-        )
+    ).to(device)
     loss_fcn = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
@@ -243,29 +236,29 @@ def main(args):
     best_test = 0
 
     for epoch in range(1, args.num_epochs + 1):
-        with model.join():
-            start = time.time()
-            model.train()
-            loss = loss_fcn(model(train_feats), train_labels)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        start = time.time()
+        model.train()
+        loss = loss_fcn(model(train_feats), train_labels)
+        optimizer.zero_grad()
+        loss.backward()
+        sar.gather_grads(model)
+        optimizer.step()
 
-            if epoch % args.eval_every == 0:
-                model.eval()
-                acc = evaluate(
-                    args, model, feats, labels, train_nid, val_nid, test_nid
-                )
-                end = time.time()
-                log = "Epoch {}, Times(s): {:.4f}".format(epoch, end - start)
-                log += ", Accuracy: Train {:.4f}, Val {:.4f}, Test {:.4f}".format(
-                    *acc
-                )
-                print(log)
-                if acc[1] > best_val:
-                    best_val = acc[1]
-                    best_epoch = epoch
-                    best_test = acc[2]
+        if epoch % args.eval_every == 0:
+            model.eval()
+            acc = evaluate(
+                args, model, feats, labels, train_nid, val_nid, test_nid
+            )
+            end = time.time()
+            log = "Epoch {}, Times(s): {:.4f}".format(epoch, end - start)
+            log += ", Accuracy: Train {:.4f}, Val {:.4f}, Test {:.4f}".format(
+                *acc
+            )
+            print(log)
+            if acc[1] > best_val:
+                best_val = acc[1]
+                best_epoch = epoch
+                best_test = acc[2]
 
     print(
         "Best Epoch {}, Val {:.4f}, Test {:.4f}".format(

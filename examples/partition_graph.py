@@ -26,6 +26,7 @@ from dgl.data import (
     CiteseerGraphDataset,
     CoraGraphDataset,
     PubmedGraphDataset,
+    RedditDataset
 )
 
 SUPPORTED_DATASETS = {
