@@ -97,7 +97,7 @@ def test_all_to_all(world_size, backend):
         try:
             initialize_worker(rank, world_size, tmp_dir, backend=kwargs["backend"])
             send_tensors_list = [torch.tensor([x] * world_size) for x in range(world_size)]
-            recv_tensors_list = [torch.tensor([0] * world_size) for _ in range(world_size)]
+            recv_tensors_list = [torch.tensor([-1] * world_size) for _ in range(world_size)]
             sar.comm.all_to_all(recv_tensors_list, send_tensors_list)
             mp_dict[f"result_{rank}"] = recv_tensors_list
         except Exception as e: 
@@ -108,3 +108,29 @@ def test_all_to_all(world_size, backend):
     for rank in range(world_size):
         for tensor in mp_dict[f"result_{rank}"]:
             assert torch.all(torch.eq(tensor, torch.tensor([rank] * world_size)))
+
+
+@pytest.mark.parametrize("backend", ["ccl", "gloo"])
+@pytest.mark.parametrize("world_size", [2, 4, 8])
+@sar_test
+def test_exchange_single_tensor(world_size, backend):
+    def exchange_single_tensor(mp_dict, rank, world_size, tmp_dir, **kwargs):
+        import torch
+        import sar
+        from base_utils import initialize_worker
+        try:
+            initialize_worker(rank, world_size, tmp_dir, backend=kwargs["backend"])
+            send_idx = rank
+            recv_idx = rank
+            for _ in range(world_size):
+                send_tensor = torch.tensor([send_idx] * world_size)
+                recv_tensor = torch.tensor([-1] * world_size)
+                sar.comm.exchange_single_tensor(recv_idx, send_idx, recv_tensor, send_tensor)
+                assert torch.all(torch.eq(recv_tensor, torch.tensor([rank] * world_size)))
+                send_idx = (send_idx + 1) % world_size
+                recv_idx = (recv_idx - 1) % world_size
+        except Exception as e: 
+            mp_dict["traceback"] = str(traceback.format_exc())
+            mp_dict["exception"] = e
+        
+    mp_dict = run_workers(exchange_single_tensor, world_size, backend=backend)

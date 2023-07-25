@@ -396,18 +396,17 @@ def exchange_single_tensor(recv_idx: int, send_idx: int,
     :type recv_tensor: Tensor
     :param send_tensor: Tensor to send to the remote worker
     :type send_tensor: Tensor
-
-
     """
-    '''
-    '''
     logger.debug(
         f'{rank()} : exchange_single_tensor on device {send_tensor.device} : {recv_idx}, {send_idx},{recv_tensor.size()},{send_tensor.size()}')
     dtype = send_tensor.dtype
     if send_idx == recv_idx == rank():
         recv_tensor.copy_(send_tensor)
+    elif backend() == 'gloo':
+        send_request = dist.isend(send_tensor.to(comm_device()), send_idx)
+        dist.recv(recv_tensor.to(comm_device()), recv_idx)
+        dist.barrier()
     else:
-
         send_tensors_list = [torch.Tensor([1.0]).to(dtype).to(comm_device())
                              for _ in range(world_size())]
 
