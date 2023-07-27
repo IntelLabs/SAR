@@ -28,13 +28,14 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 import torch.distributed as dist
+import sys
+#sys.path.insert(0, '/home/hesham/nervana_git/dgl/python/')  # noqa
 import dgl  # type: ignore
 from dgl.heterograph import DGLBlock  # type: ignore
-
-
 import sar
 
 
+print('dgl path', dgl.__path__)
 parser = ArgumentParser(
     description="GNN training on node classification tasks in homogeneous graphs")
 
@@ -57,6 +58,16 @@ parser.add_argument('--backend', default='nccl', type=str, choices=['ccl', 'nccl
 parser.add_argument(
     "--cpu-run", action="store_true",
     help="Run on CPUs if set, otherwise run on GPUs "
+)
+
+parser.add_argument(
+    "--hybrid-partitioning", action="store_true",
+    help="Run on CPUs if set, otherwise run on GPUs "
+)
+
+parser.add_argument(
+    "--batch-comm-overlap", action="store_true",
+    help="Overlap sampling and communication "
 )
 
 parser.add_argument(
@@ -210,7 +221,9 @@ def main():
                                                                  'features': features},
                                                              output_node_features={
                                                                  'labels': labels},
-                                                             output_device=device
+                                                             output_device=device,
+                                                             use_hybrid_partitioning=args.hybrid_partitioning,
+                                                             batch_comm_overlap=args.batch_comm_overlap
                                                              )
 
     train_nodes = masks['train_indices'] + node_ranges[sar.rank()][0]
@@ -224,7 +237,8 @@ def main():
         precompute_optimized_batches=args.precompute_batches,
         optimized_batches_cache=(
             args.optimized_batches_cache if args.optimized_batches_cache else None),
-        num_workers=args.num_workers)
+        num_workers=args.num_workers,
+        batch_comm_overlap=args.batch_comm_overlap)
 
     print('sampling graph edata', full_graph_manager.sampling_graph.edata)
 
@@ -272,6 +286,7 @@ def main():
         print('loss', total_loss, flush=True)
         print('accuracy ', n_correct/n_total, flush=True)
 
+        continue
         # Full graph inference is done on CPUs using sequential
         # aggregation and re-materialization
         gnn_model_cpu.eval()

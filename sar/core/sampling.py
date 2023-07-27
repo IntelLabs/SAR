@@ -20,12 +20,14 @@
 
 from typing import List,  Tuple, Dict, Optional,   cast, Union
 import functools
+import itertools
 import os
 import logging
 import torch
 import dgl  # type: ignore
 from dgl.heterograph import DGLBlock  # type: ignore
-from dgl.heterograph import DGLGraph  # type: ignore
+# from dgl.heterograph import DGLGraph  # type: ignore
+from dgl.heterograph import DGLHeteroGraph as DGLGraph  # type: ignore
 
 from dgl.sampling import sample_neighbors  # type: ignore
 import dgl.partition  # type:ignore
@@ -34,7 +36,7 @@ from torch import Tensor
 import torch.distributed as dist
 
 from ..comm import rank, exchange_tensors, world_size,\
-    master_ip, master_port, backend, comm_device, initialize_comms, all_reduce
+    master_ip, master_port, backend, comm_device, initialize_comms, all_reduce, comm_thread
 from .graphshard import GraphShardManager
 
 logger = logging.getLogger(__name__)
@@ -151,11 +153,15 @@ class DistNeighborSampler:
                  copy_edata: Optional[bool] = True,
                  input_node_features: Optional[Dict[str, Tensor]] = None,
                  output_node_features: Optional[Dict[str, Tensor]] = None,
-                 output_device: Optional[torch.device] = None):
+                 output_device: Optional[torch.device] = None,
+                 use_hybrid_partitioning=False,
+                 batch_comm_overlap=False):
         self.fanouts = fanouts
         self.prob = prob
         self.replace = replace
         self.copy_edata = copy_edata
+        self.use_hybrid_partitioning = use_hybrid_partitioning
+        self.batch_comm_overlap = batch_comm_overlap
 
         for node_features in [input_node_features, output_node_features]:
             if node_features is not None:
@@ -177,9 +183,9 @@ class DistNeighborSampler:
                                 output_device=self.output_device)
         return temp
 
-    def _add_input_features(self, sampled_block: DGLBlock,
-                            input_nodes,
-                            node_ranges):
+    def add_input_features(self, sampled_block: DGLBlock,
+                           input_nodes,
+                           node_ranges):
         if self.input_node_features is not None:
             per_partition_indices = [
                 torch.logical_and(input_nodes >= start_idx,
@@ -190,6 +196,7 @@ class DistNeighborSampler:
                 for indices, (start_idx, _) in zip(per_partition_indices, node_ranges)]
             local_nodes = per_partition_input_nodes[rank()]
             per_partition_input_nodes[rank()] = local_nodes.new(0)
+#            print('per partition input nodes', [x.size() for x in per_partition_input_nodes])
             requested_nodes = exchange_tensors(per_partition_input_nodes)
 
             for feature_name in self.input_node_features:
@@ -208,6 +215,7 @@ class DistNeighborSampler:
                                            ] = fetched_node_features[part_idx]
                 sampled_block.srcdata[feature_name] = graph_input_tensor.to(
                     sampled_block.device)
+        return True
 
     def _add_output_features(self, sampled_block: DGLBlock,
                              node_ranges: List[Tuple[int, int]]):
@@ -247,20 +255,10 @@ class DistNeighborSampler:
 
         return local_sampled_graph, local_sampled_graph_edata
 
-    def sample(self, full_graph_manager: GraphShardManager,
-               seeds: Tensor) -> List[DGLBlock]:
-        """
-        Distributed sampling
-
-        :param full_graph_manager: The distributed graph from which to sample
-        :type full_graph_manager: GraphShardManager
-        :param seeds: The seed nodes for sampling
-        :type seeds: Tensor
-        :returns: A list of ``DGLBlock`` objects with the same length as ``fanouts``
-        :rtype: List[DGLBlock]
-        """
-        sampling_graph = full_graph_manager.sampling_graph
+    def _sample_distributed_graph(self, full_graph_manager: GraphShardManager,
+                                  seeds: Tensor):
         node_ranges = full_graph_manager.node_ranges
+        sampling_graph = full_graph_manager.sampling_graph
 
         final_sampled_graphs = [dgl.to_block(self._sample_local(sampling_graph,
                                                                 self.fanouts[-1], seeds), seeds)]
@@ -300,10 +298,42 @@ class DistNeighborSampler:
             input_nodes = final_sampled_graphs[-1].srcdata[dgl.NID].to(
                 sampling_graph.device)
 
-        self._add_input_features(
-            final_sampled_graphs[-1], input_nodes, node_ranges)
-
         return final_sampled_graphs[::-1]
+
+    def _sample_hybrid_graph(self, full_graph_manager: GraphShardManager,
+                             seeds: Tensor):
+        print('sampling hybrid')
+        node_ranges = full_graph_manager.node_ranges
+        full_graph = full_graph_manager.full_graph
+        multi_layer_sampler = dgl.dataloading.NeighborSampler(self.fanouts)
+        _, _, final_sampled_graphs = multi_layer_sampler.sample_blocks(
+            full_graph, seeds)
+        self._add_output_features(final_sampled_graphs[-1], node_ranges)
+
+        return final_sampled_graphs
+
+    def sample(self, full_graph_manager: GraphShardManager,
+               seeds: Tensor) -> List[DGLBlock]:
+        """
+        Distributed sampling
+
+        :param full_graph_manager: The distributed graph from which to sample
+        :type full_graph_manager: GraphShardManager
+        :param seeds: The seed nodes for sampling
+        :type seeds: Tensor
+        :returns: A list of ``DGLBlock`` objects with the same length as ``fanouts``
+        :rtype: List[DGLBlock]
+        """
+
+        if self.use_hybrid_partitioning:
+            blocks = self._sample_hybrid_graph(full_graph_manager, seeds)
+        else:
+            blocks = self._sample_distributed_graph(full_graph_manager, seeds)
+
+        if not self.batch_comm_overlap:
+            self.add_input_features(blocks[0], blocks[0].srcdata[dgl.NID],
+                                    full_graph_manager.node_ranges)
+        return blocks
 
 
 def DataLoader(full_graph_manager: GraphShardManager,
@@ -314,8 +344,9 @@ def DataLoader(full_graph_manager: GraphShardManager,
                shuffle: bool = False,
                precompute_optimized_batches: bool = True,
                optimized_batches_cache: Optional[str] = None,
-               num_workers: int = 0):
-    """A dataloader for distributed node sampling 
+               num_workers: int = 0,
+               batch_comm_overlap=False):
+    """A dataloader for distributed node sampling
 
     :param full_graph_manager: The distributed graph from which to sample
     :type full_graph_manager: GraphShardManager
@@ -331,7 +362,7 @@ def DataLoader(full_graph_manager: GraphShardManager,
     :param shuffle: Shuffle the seed nodes each iteration
     :type shuffle: bool
     :param precompute_optimized_batches: Create balanced node minibatches that minimizes the number\
-    of edges between nodes in different minibatches. 
+    of edges between nodes in different minibatches.
     :type precompute_optimized_batches: bool
     :param optimized_batches_cache: The file name prefix for the cache files that will be used to\
     store the created minibatches. If provided, the files will be created if they do not exist.\
@@ -382,15 +413,46 @@ def DataLoader(full_graph_manager: GraphShardManager,
             adjusted_seed_nodes = seed_nodes
         adjusted_batch_size = batch_size
 
-    return torch.utils.data.DataLoader(cast(torch.utils.data.Dataset, adjusted_seed_nodes),
-                                       batch_size=adjusted_batch_size,
-                                       shuffle=shuffle,
-                                       drop_last=drop_last,
-                                       num_workers=num_workers,
-                                       worker_init_fn=process_init_foo,
-                                       persistent_workers=(num_workers > 0),
-                                       multiprocessing_context='spawn' if num_workers > 0 else None,
-                                       collate_fn=node_collator.collate)
+    base_dataloader = torch.utils.data.DataLoader(cast(torch.utils.data.Dataset, adjusted_seed_nodes),
+                                                  batch_size=adjusted_batch_size,
+                                                  shuffle=shuffle,
+                                                  drop_last=drop_last,
+                                                  num_workers=num_workers,
+                                                  worker_init_fn=process_init_foo,
+                                                  persistent_workers=(
+                                                      num_workers > 0),
+                                                  multiprocessing_context='spawn' if num_workers > 0 else None,
+                                                  collate_fn=node_collator.collate)
+
+    if batch_comm_overlap:
+        return CommOverlapDataLoader(graph_sampler,
+                                     base_dataloader,
+                                     full_graph_manager.node_ranges)
+    else:
+        return base_dataloader
+
+
+class CommOverlapDataLoader:
+    def __init__(self, graph_sampler, base_dataloader, node_ranges):
+        self.base_dataloader = base_dataloader
+        self.node_ranges = node_ranges
+        self.graph_sampler = graph_sampler
+
+    def __iter__(self):
+        previous_blocks = None
+        for current_blocks in self.base_dataloader:
+            comm_thread.submit_task('prefetch_features', functools.partial(self.graph_sampler.add_input_features,
+                                                                           current_blocks[0],
+                                                                           current_blocks[0].srcdata[dgl.NID],
+                                                                           self.node_ranges))
+            if previous_blocks is not None:
+                comm_thread.get_result()
+                yield previous_blocks
+
+            previous_blocks = current_blocks
+
+        comm_thread.get_result()
+        yield previous_blocks
 
 
 class NodeCollator:

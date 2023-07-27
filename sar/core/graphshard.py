@@ -33,7 +33,7 @@ from collections.abc import MutableMapping
 from contextlib import contextmanager
 import torch
 import dgl  # type:ignore
-from dgl import DGLGraph
+from dgl import DGLHeteroGraph as DGLGraph
 from dgl.function.base import TargetCode  # type:ignore
 import dgl.function as fn  # type: ignore
 from torch import Tensor
@@ -41,7 +41,7 @@ import torch.distributed as dist
 
 
 from ..common_tuples import ShardEdgesAndFeatures, AggregationData, TensorPlace, ShardInfo
-from ..comm import exchange_tensors,  rank, all_reduce
+from ..comm import exchange_tensors,  rank, all_reduce, world_size
 from .sar_aggregation import sar_op
 from .full_partition_block import DistributedBlock
 
@@ -235,6 +235,7 @@ class GraphShardManager:
             self.dstdata = ChainedDataView(self.num_dst_nodes())
 
         self._sampling_graph = None
+        self._full_graph = None
 
     @property
     def tgt_node_range(self) -> Tuple[int, int]:
@@ -260,6 +261,34 @@ class GraphShardManager:
         if self._sampling_graph is not None:
             return self._sampling_graph
 
+        self._sampling_graph = self.get_local_graph()
+        return self._sampling_graph
+
+    @property
+    def full_graph(self):
+        """
+        Returns the full graph topology by gathering this topology from all
+        workers
+
+        """
+        if self._full_graph is not None:
+            return self._full_graph
+
+        local_graph = self.get_local_graph()
+        src_nodes, dst_nodes = local_graph.all_edges()
+        full_graph_src_nodes = exchange_tensors([src_nodes] * world_size())
+        full_graph_dst_nodes = exchange_tensors([dst_nodes] * world_size())
+
+        full_graph = dgl.graph((torch.cat(full_graph_src_nodes),
+                                torch.cat(full_graph_dst_nodes)), num_nodes=self.graph_shards[-1].src_range[1])
+
+        for efeat_key, efeat_value in local_graph.edata.items():
+            full_efeat_value = exchange_tensors([efeat_value]*world_size())
+            full_graph.edata[efeat_key] = torch.cat(full_efeat_value)
+        self._full_graph = full_graph
+        return full_graph
+
+    def get_local_graph(self) -> DGLGraph:
         global_src_nodes = []
         global_tgt_nodes = []
         for shard in self.graph_shards:
@@ -269,10 +298,10 @@ class GraphShardManager:
                 shard.unique_tgt_nodes[shard.graph.all_edges()[1]])
 
         # We only need the csc format for sampling
-        sampling_graph = dgl.graph((torch.cat(global_src_nodes),
-                                    torch.cat(global_tgt_nodes)),
-                                   num_nodes=self.graph_shards[-1].src_range[1]).shared_memory(
-                                       'sample_graph'+repr(os.getpid()), formats=['csc'])
+        local_graph = dgl.graph((torch.cat(global_src_nodes),
+                                 torch.cat(global_tgt_nodes)),
+                                num_nodes=self.graph_shards[-1].src_range[1])  # .shared_memory(
+#            'sample_graph'+repr(os.getpid()), formats=['csc'])
         del global_src_nodes, global_tgt_nodes
 
         edge_feat_dict: Dict[str, Tensor] = {}
@@ -281,10 +310,8 @@ class GraphShardManager:
                 torch.cat([g_shard.graph.edata[edge_feat_key]
                            for g_shard in self.graph_shards]).share_memory_()
 
-        sampling_graph.edata.update(edge_feat_dict)
-
-        self._sampling_graph = sampling_graph
-        return sampling_graph
+        local_graph.edata.update(edge_feat_dict)
+        return local_graph
 
     def update_boundary_nodes_indices(self) -> List[Tensor]:
         all_my_sources_indices = [
