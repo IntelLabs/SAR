@@ -52,7 +52,7 @@ parser.add_argument('--log-level', default='INFO', type=str,
                     help='SAR log level ')
 
 
-parser.add_argument('--backend', default='ccl', type=str, choices=['ccl', 'nccl', 'mpi'],
+parser.add_argument('--backend', default='ccl', type=str, choices=['ccl', 'nccl', 'mpi', 'gloo'],
                     help='Communication backend to use ')
 
 parser.add_argument(

@@ -140,7 +140,7 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
     :type _world_size: int
     :param master_ip_address: IP address of the master worker (worker with rank 0)
     :type master_ip_address: str
-    :param backend: Backend to use. Can be ccl, nccl, or mpi
+    :param backend: Backend to use. Can be ccl, nccl, mpi or gloo
     :type backend: str
     :param _comm_device:  The device on which the tensors should be on in order to transmit them\
     through the backend. If not provided, the device is infered based on the backend type
@@ -150,8 +150,8 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
 
 
     """
-    assert backend in ['ccl', 'nccl',
-                       'mpi'], 'backend must be ccl, nccl, or mpi'
+    assert backend in ['ccl', 'nccl', 'mpi', 'gloo'],\
+        'backend must be ccl, nccl, mpi or gloo'
     if _comm_device is None:
         if backend == 'nccl':
             _comm_device = torch.device('cuda')
@@ -200,8 +200,8 @@ def initialize_comms(_rank: int, _world_size: int, master_ip_address: str,
                          "You can try to do it manually before calling sar.initialize_comms")
             raise
     else:
-        assert dist.get_backend() in ['ccl', 'nccl',
-                       'mpi'], 'backend must be ccl, nccl, or mpi'
+        assert dist.get_backend() in ['ccl', 'nccl', 'mpi', 'gloo'],\
+            'backend must be ccl, nccl, mpi or gloo'
 
     _CommData.rank = _rank
     _CommData.world_size = _world_size
@@ -295,7 +295,8 @@ def all_to_all(recv_tensors: List[torch.Tensor], send_tensors: List[torch.Tensor
 
 def all_reduce(red_tensor: torch.Tensor, op: dist.ReduceOp,
                move_to_comm_device: bool = False):   # pylint: disable=invalid-name
-    """ wrapper around dist.all_reduce
+    """
+    Wrapper around dist.all_reduce
 
     :param red_tensor: reduction tensor
     :type red_tensor: torch.Tensor
@@ -303,8 +304,6 @@ def all_reduce(red_tensor: torch.Tensor, op: dist.ReduceOp,
     :type op: dist.ReduceOp
     :param move_to_comm_device: Move to comm device or not
     :type move_to_comm_device: bool
-
-
     """
 
     if move_to_comm_device:
@@ -316,10 +315,18 @@ def all_reduce(red_tensor: torch.Tensor, op: dist.ReduceOp,
 
 
 def all_to_all_rounds(recv_tensors: List[torch.Tensor], send_tensors: List[torch.Tensor]):
+    """
+    All_to_all wrapper which breaks down the collective call into multiple
+    torch.distributed.all_to_all calls so that the size of the data in each
+    call is below Config.max_collective_size
+    
+    :param recv_tensors: List of tensors to receive from other workers
+    :type recv_tensors: List[torch.Tensor]
+    :param send_tensors: List of tensor to send to other workers
+    :type send_tensors: List[torch.Tensor]
+    """
     if Config.max_collective_size == 0:
-        #print('all to all', recv_tensors, send_tensors, flush=True)
-        dist.all_to_all(recv_tensors, send_tensors)
-        #print('all to all complete', recv_tensors, send_tensors, flush=True)
+        all_to_all_gloo_support(recv_tensors, send_tensors)
     else:
         max_n_elems = Config.max_collective_size
         total_elems = sum(r_tensor.numel() for r_tensor in recv_tensors) + \
@@ -333,7 +340,34 @@ def all_to_all_rounds(recv_tensors: List[torch.Tensor], send_tensors: List[torch
                                    s_tensor in send_tensors]
             recv_tensors_slices = [_get_tensor_slice(r_tensor, n_rounds, round_idx) for
                                    r_tensor in recv_tensors]
-            dist.all_to_all(recv_tensors_slices, send_tensors_slices)
+            all_to_all_gloo_support(recv_tensors_slices, send_tensors_slices)
+
+
+def all_to_all_gloo_support(recv_tensors: List[torch.Tensor], send_tensors: List[torch.Tensor]):
+    """
+    Since gloo backend doesn't support all_to_all function, SAR implements it
+    with multiple asynchronous sends (torch.dist.isend). For every other backend
+    torch.dist.all_to_all is used.
+
+    :param recv_tensors: List of tensors to receive from other workers
+    :type recv_tensors: List[torch.Tensor]
+    :param send_tensors: List of tensor to send to other workers
+    :type send_tensors: List[torch.Tensor]
+    """
+    if backend() == 'gloo':
+        send_requests = []
+        for i in range(world_size()):
+            if i == rank():
+                recv_tensors[i].copy_(send_tensors[i])
+            else:
+                send_request = dist.isend(send_tensors[i], i)
+                send_requests.append(send_request)
+        for i in range(world_size()):
+            if i != rank():
+                dist.recv(recv_tensors[i], i)
+        dist.barrier()
+    else:
+        dist.all_to_all(recv_tensors, send_tensors)
 
 
 def _get_tensor_slice(tens: Tensor, n_splits: int, split_idx: int) -> Tensor:
@@ -362,18 +396,17 @@ def exchange_single_tensor(recv_idx: int, send_idx: int,
     :type recv_tensor: Tensor
     :param send_tensor: Tensor to send to the remote worker
     :type send_tensor: Tensor
-
-
     """
-    '''
-    '''
     logger.debug(
         f'{rank()} : exchange_single_tensor on device {send_tensor.device} : {recv_idx}, {send_idx},{recv_tensor.size()},{send_tensor.size()}')
     dtype = send_tensor.dtype
     if send_idx == recv_idx == rank():
         recv_tensor.copy_(send_tensor)
+    elif backend() == 'gloo':
+        send_request = dist.isend(send_tensor.to(comm_device()), send_idx)
+        dist.recv(recv_tensor.to(comm_device()), recv_idx)
+        dist.barrier()
     else:
-
         send_tensors_list = [torch.Tensor([1.0]).to(dtype).to(comm_device())
                              for _ in range(world_size())]
 
@@ -430,8 +463,6 @@ def exchange_tensors(tensors: List[torch.Tensor], recv_sizes: Optional[List[int]
             comm_device()) for _ in range(len(tensors))]
 
         all_to_all(all_their_sizes, all_my_sizes)
-        #print('all my sizes', all_my_sizes)
-        #print('all their sizes', all_their_sizes)
 
         all_their_sizes_i = [cast(int, x.item()) for x in all_their_sizes]
     else:

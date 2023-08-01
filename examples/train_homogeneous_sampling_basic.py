@@ -50,7 +50,7 @@ parser.add_argument('--ip-file', default='./ip_file', type=str,
                     help='File with ip-address. Worker 0 creates this file and all others read it ')
 
 
-parser.add_argument('--backend', default='nccl', type=str, choices=['ccl', 'nccl', 'mpi'],
+parser.add_argument('--backend', default='nccl', type=str, choices=['ccl', 'nccl', 'mpi', 'gloo'],
                     help='Communication backend to use '
                     )
 
