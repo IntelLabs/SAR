@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 
 setup(
-    name='sar',
+    name='sar-gnn',
     version='0.1.0',
     python_requires='>=3.8',
     install_requires=[
