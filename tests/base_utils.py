@@ -39,6 +39,25 @@ def get_random_graph():
     return graph
 
 
+def get_random_hetero_graph():
+    """
+    Generates small heterogenous graph with features and labels
+    on only one of all of the node types
+    
+    :returns: dgl graph
+    """
+    graph_data = {
+        ("n_type_1", "rel_1", "n_type_2"): (torch.randint(0, 800, (40,)), torch.randint(0, 800, (40,))),
+        ("n_type_1", "rel_2", "n_type_3"): (torch.randint(0, 800, (40,)), torch.randint(0, 800, (40,))),
+        ("n_type_2", "rel_3", "n_type_3"): (torch.randint(0, 800, (40,)), torch.randint(0, 800, (40,))),
+        ("n_type_3", "rel_4", "n_type_4"): (torch.randint(0, 800, (40,)), torch.randint(0, 800, (40,)))
+    }
+    hetero_graph = dgl.heterograph(graph_data)
+    hetero_graph.nodes["n_type_1"].data["features"] = torch.rand((hetero_graph.num_nodes("n_type_1"), 10))        
+    hetero_graph.nodes["n_type_1"].data["labels"] = torch.randint(0, 10, (hetero_graph.num_nodes("n_type_1"),))
+    return hetero_graph
+
+
 def load_partition_data(rank, graph_name, tmp_dir):
     """
     Boilerplate code for loading partition data
