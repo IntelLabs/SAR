@@ -24,6 +24,7 @@ Tuples for grouping related data
 from typing import NamedTuple, Dict, Tuple, List, Optional, Any, TYPE_CHECKING
 from enum import Enum
 from torch import Tensor
+import dgl  # type: ignore
 
 if TYPE_CHECKING:
     from .core.graphshard import GraphShardManager
@@ -94,6 +95,10 @@ class PartitionData(NamedTuple):
 
         List of edge type names. Use in conjunction with dgl.ETYPE edge features to get\
     the edge type of each edge
+    
+    .. py:attribute:: partition_book : dgl.distributed.GraphPartitionBook
+    
+        The graph partition information
 
 
     '''
@@ -103,6 +108,7 @@ class PartitionData(NamedTuple):
     node_features: Dict[str, Tensor]
     node_type_names: List[str]
     edge_type_names: List[str]
+    partition_book: dgl.distributed.GraphPartitionBook
 
 
 class AggregationData(NamedTuple):

@@ -173,7 +173,8 @@ def create_partition_data(graph: dgl.DGLGraph,
                          node_ranges,
                          node_features,
                          node_type_list,
-                         edge_type_list
+                         edge_type_list,
+                         partition_book
                          )
 
 

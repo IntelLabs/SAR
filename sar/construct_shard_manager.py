@@ -204,7 +204,7 @@ def construct_full_graph(partition_data: PartitionData) -> GraphShardManager:
     seed_nodes = torch.arange(partition_data.node_ranges[rank()][1] -
                               partition_data.node_ranges[rank()][0])
     return GraphShardManager(graph_shard_list,
-                             seed_nodes, seed_nodes)
+                             seed_nodes, seed_nodes, partition_data.partition_book)
     
 def convert_dist_graph(dist_graph: dgl.distributed.DistGraph) -> GraphShardManager:
     partition_data = load_dgl_partition_data_from_graph(dist_graph, dist_graph.device)

@@ -182,13 +182,15 @@ class GraphShardManager:
     :type local_src_seeds: torch.Tensor
     :param local_tgt_seeds: The node indices of the output nodes relative to the starting node index of the local partition
     :type local_tgt_seeds: torch.Tensor
-
+    :param partition_book: The graph partition information
+    :type partition_book: dgl.distributed.GraphPartitionBook
     """
 
-    def __init__(self, graph_shards: List[GraphShard], local_src_seeds: Tensor, local_tgt_seeds: Tensor) -> None:
+    def __init__(self, graph_shards: List[GraphShard], local_src_seeds: Tensor, local_tgt_seeds: Tensor, partition_book: dgl.distributed.GraphPartitionBook) -> None:
         super().__init__()
         self.graph_shards = graph_shards
-
+        self.partition_book = partition_book
+        
         # source nodes and target nodes are all the same
         # srcdata, dstdata and ndata should be also the same
         self.src_is_tgt = local_src_seeds is local_tgt_seeds
@@ -235,6 +237,19 @@ class GraphShardManager:
             self.dstdata = ChainedDataView(self.num_dst_nodes())
 
         self._sampling_graph = None
+        
+
+    @property
+    def ntypes(self) -> List[str]:
+        return self.partition_book.ntypes
+    
+    @property
+    def etypes(self) -> List[str]:
+        return self.partition_book.etypes
+    
+    @property
+    def canonical_etypes(self) -> List[Tuple[str, str, str]]:
+        return self.partition_book.canonical_etypes
 
     @property
     def tgt_node_range(self) -> Tuple[int, int]:
@@ -247,6 +262,15 @@ class GraphShardManager:
     @property
     def node_ranges(self) -> List[Tuple[int, int]]:
         return [g_shard.src_range for g_shard in self.graph_shards]
+    
+    @property
+    def ndata(self):
+        assert self.src_is_tgt, "ndata shouldn't be used with MFGs"
+        return self.srcdata
+
+    @property
+    def is_block(self):
+        return True
 
     @property
     def sampling_graph(self):
@@ -312,15 +336,6 @@ class GraphShardManager:
             self.dstdata = self.srcdata
         else:
             self.dstdata = self.dstdata.rewind()
-
-    @property
-    def ndata(self):
-        assert self.src_is_tgt, "ndata shouldn't be used with MFGs"
-        return self.srcdata
-
-    @property
-    def is_block(self):
-        return True
 
     def get_full_partition_graph(self,
                                  delete_shard_data: bool = True) -> DistributedBlock:
@@ -395,7 +410,9 @@ class GraphShardManager:
         return self
 
     def num_nodes(self, ntype=None) -> int:
-        return sum(x.graph.num_nodes(ntype) for x in self.graph_shards)
+        if ntype is not None:
+            return self.partition_book._num_nodes(ntype)
+        return self.partition_book._num_nodes()
 
     def number_of_nodes(self, ntype=None) -> int:
         return self.num_nodes(ntype)
@@ -414,11 +431,13 @@ class GraphShardManager:
     def number_of_dst_nodes(self, ntype=None) -> int:
         return self.num_dst_nodes(ntype)
 
+    def num_edges(self, etype=None) -> int:
+        if etype is not None:
+            return self.partition_book._num_edges(etype)
+        return self.partition_book._num_edges()
+    
     def number_of_edges(self, etype=None) -> int:
         return self.num_edges(etype)
-
-    def num_edges(self, etype=None) -> int:
-        return sum(x.graph.num_edges(etype) for x in self.graph_shards)
 
     def in_degrees(self, vertices=dgl.ALL, etype=None) -> Tensor:
         if etype not in self.in_degrees_cache:
