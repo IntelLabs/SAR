@@ -227,8 +227,9 @@ class GraphShardManager:
         self.in_degrees_cache: Dict[Optional[str], Tensor] = {}
         self.out_degrees_cache: Dict[Optional[str], Tensor] = {}
 
+        # passing number of nodes and edges specific for current machine not whole distributed graph
         self.srcdata = ChainedDataView(self.num_src_nodes())
-        self.edata = ChainedDataView(self.num_edges())
+        self.edata = ChainedDataView(self.partition_book.metadata()[rank()]["num_edges"])
 
         if self.src_is_tgt:
             assert self.num_src_nodes() == self.num_dst_nodes()
