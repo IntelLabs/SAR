@@ -56,6 +56,7 @@ def make_induced_graph_shard_manager(full_graph_shards: List[ShardEdgesAndFeatur
                                      seed_nodes: Tensor,
                                      node_ranges: List[Tuple[int, int]],
                                      edge_type_names: List[str],
+                                     partition_book : dgl.distributed.GraphPartitionBook,
                                      keep_seed_nodes: bool = True) -> GraphShardManager:
     '''
     Creates new graph shards that only contain edges to the seed nodes. Adjusts the target
@@ -104,7 +105,7 @@ def make_induced_graph_shard_manager(full_graph_shards: List[ShardEdgesAndFeatur
         graph_shard_list.append(GraphShard(shard_edges_features,
                                            src_range, tgt_range, edge_type_names))
 
-    return GraphShardManager(graph_shard_list, src_compact_data['local_src_seed_nodes'], seed_nodes)
+    return GraphShardManager(graph_shard_list, src_compact_data['local_src_seed_nodes'], seed_nodes, partition_book)
 
 
 def compact_src_ranges(active_edges_src, seed_nodes, node_ranges, keep_seed_nodes):
@@ -178,6 +179,7 @@ def construct_mfgs(partition_data: PartitionData,
                                                seed_nodes,
                                                partition_data.node_ranges,
                                                partition_data.edge_type_names,
+                                               partition_data.partition_book,
                                                keep_seed_nodes)
         graph_shard_manager_list.append(gsm)
         seed_nodes = gsm.input_nodes + partition_data.node_ranges[rank()][0]
