@@ -184,9 +184,16 @@ class GraphShardManager:
     :type local_tgt_seeds: torch.Tensor
     :param partition_book: The graph partition information
     :type partition_book: dgl.distributed.GraphPartitionBook
+    :param node_types: tensor with node types in local partition
+    :param node_types: torch.Tensor
     """
 
-    def __init__(self, graph_shards: List[GraphShard], local_src_seeds: Tensor, local_tgt_seeds: Tensor, partition_book: dgl.distributed.GraphPartitionBook) -> None:
+    def __init__(self,
+                 graph_shards: List[GraphShard],
+                 local_src_seeds: Tensor,
+                 local_tgt_seeds: Tensor,
+                 partition_book: dgl.distributed.GraphPartitionBook,
+                 node_types: Tensor) -> None:
         super().__init__()
         self.graph_shards = graph_shards
         self.partition_book = partition_book
@@ -236,6 +243,20 @@ class GraphShardManager:
             self.dstdata = self.srcdata
         else:
             self.dstdata = ChainedDataView(self.num_dst_nodes())
+            
+        # Preparing dictionary for sotring number of nodes with given type in a graph
+        self.src_node_types_count_dict = {}
+        self.dst_node_types_count_dict = {}
+        src_node_types_unique, src_node_types_count = torch.unique(node_types[self.input_nodes], return_counts=True)
+        if self.src_is_tgt:
+            dst_node_types_unique, dst_node_types_count = torch.unique(node_types[self.seeds], return_counts=True)
+        else: 
+            # For MFGs we need to convert seeds from global to the local numbering
+            dst_node_types_unique, dst_node_types_count = torch.unique(node_types[self.seeds - self.tgt_node_range[0]], return_counts=True)
+        for ntype in self.partition_book.ntypes:
+            type_index = partition_book.ntypes.index(ntype)
+            self.src_node_types_count_dict[ntype] = src_node_types_count[(src_node_types_unique == type_index).nonzero().item()] if type_index in src_node_types_unique else 0
+            self.dst_node_types_count_dict[ntype] = dst_node_types_count[(dst_node_types_unique == type_index).nonzero().item()] if type_index in dst_node_types_unique else 0
 
         self._sampling_graph = None
         
@@ -268,6 +289,16 @@ class GraphShardManager:
     def ndata(self):
         assert self.src_is_tgt, "ndata shouldn't be used with MFGs"
         return self.srcdata
+    
+    @property
+    def srctypes(self):
+        return [ntype for ntype in self.src_node_types_count_dict if
+                self.src_node_types_count_dict[ntype] > 0]
+    
+    @property
+    def dsttypes(self):
+        return [ntype for ntype in self.dst_node_types_count_dict if
+                self.dst_node_types_count_dict[ntype] > 0]
 
     @property
     def is_block(self):
@@ -419,14 +450,16 @@ class GraphShardManager:
         return self.num_nodes(ntype)
 
     def num_src_nodes(self, ntype=None) -> int:
-        assert ntype is None, 'Node types not supported in GraphShardManager'
+        if ntype is not None:
+            return self.src_node_types_count_dict[ntype]
         return self.local_src_node_range[1] - self.local_src_node_range[0]
 
     def number_of_src_nodes(self, ntype=None) -> int:
         return self.num_src_nodes(ntype)
 
     def num_dst_nodes(self, ntype=None) -> int:
-        assert ntype is None, 'Node types not supported in GraphShardManager'
+        if ntype is not None:
+            return self.dst_node_types_count_dict[ntype]
         return self.tgt_node_range[1] - self.tgt_node_range[0]
 
     def number_of_dst_nodes(self, ntype=None) -> int:

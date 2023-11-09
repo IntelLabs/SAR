@@ -47,10 +47,10 @@ def get_random_hetero_graph():
     :returns: dgl graph
     """
     graph_data = {
-        ("n_type_1", "rel_1", "n_type_2"): (torch.randint(0, 800, (40,)), torch.randint(0, 800, (40,))),
-        ("n_type_1", "rel_2", "n_type_3"): (torch.randint(0, 800, (40,)), torch.randint(0, 800, (40,))),
-        ("n_type_2", "rel_3", "n_type_3"): (torch.randint(0, 800, (40,)), torch.randint(0, 800, (40,))),
-        ("n_type_3", "rel_4", "n_type_4"): (torch.randint(0, 800, (40,)), torch.randint(0, 800, (40,)))
+        ("n_type_1", "rel_1", "n_type_2"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,))),
+        ("n_type_1", "rel_2", "n_type_3"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,))),
+        ("n_type_2", "rel_3", "n_type_3"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,))),
+        ("n_type_3", "rel_4", "n_type_4"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,)))
     }
     hetero_graph = dgl.heterograph(graph_data)
     hetero_graph.nodes["n_type_1"].data["features"] = torch.rand((hetero_graph.num_nodes("n_type_1"), 10))        
