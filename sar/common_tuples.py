@@ -75,7 +75,7 @@ class PartitionData(NamedTuple):
 
     .. py:attribute:: all_shard_edges : List[ShardEdgesAndFeatures]
 
-        A list of  ShardEdgesAndFeatures objects. One for edges incoming from each partition
+        A list of ShardEdgesAndFeatures objects. One for edges incoming from each partition
 
 
     .. py:attribute:: node_ranges : List[Tuple[int,int]]
