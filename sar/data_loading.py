@@ -137,14 +137,14 @@ def create_partition_data(graph: dgl.DGLGraph,
     if dgl.NTYPE in graph.ndata:
         node_features[dgl.NTYPE] = graph.ndata[dgl.NTYPE][graph.ndata['inner_node'].bool()]
     else:
-        node_features[dgl.NTYPE] = torch.zeros(graph.num_nodes())[graph.ndata['inner_node'].bool()]
+        node_features[dgl.NTYPE] = torch.zeros(graph.num_nodes(), dtype=torch.int32)[graph.ndata['inner_node'].bool()]
 
     # Include the edge types in the edge feature dictionary
     inner_edge_mask = graph.edata['inner_edge'].bool()
     if dgl.ETYPE in graph.edata:
         edge_features[dgl.ETYPE] = graph.edata[dgl.ETYPE][inner_edge_mask]
     else:
-        edge_features[dgl.ETYPE] = torch.zeros(graph.num_edges())[inner_edge_mask]
+        edge_features[dgl.ETYPE] = torch.zeros(graph.num_edges(), dtype=torch.int32)[inner_edge_mask]
 
     # Obtain the inner edges. These are the partition edges
     local_partition_edges = torch.stack(graph.all_edges())[:, inner_edge_mask]

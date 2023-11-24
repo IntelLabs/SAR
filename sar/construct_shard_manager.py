@@ -58,7 +58,6 @@ def make_induced_graph_shard_manager(full_graph_shards: List[ShardEdgesAndFeatur
                                      edge_type_names: List[str],
                                      partition_book : dgl.distributed.GraphPartitionBook,
                                      node_types: Tensor,
-                                     all_shard_edges: ShardEdgesAndFeatures,
                                      keep_seed_nodes: bool = True) -> GraphShardManager:
     '''
     Creates new graph shards that only contain edges to the seed nodes. Adjusts the target
@@ -108,7 +107,7 @@ def make_induced_graph_shard_manager(full_graph_shards: List[ShardEdgesAndFeatur
                                            src_range, tgt_range, edge_type_names))
 
     return GraphShardManager(graph_shard_list, src_compact_data['local_src_seed_nodes'],
-                             seed_nodes, partition_book, node_types, all_shard_edges)
+                             seed_nodes, partition_book, node_types)
 
 
 def compact_src_ranges(active_edges_src, seed_nodes, node_ranges, keep_seed_nodes):
@@ -184,7 +183,6 @@ def construct_mfgs(partition_data: PartitionData,
                                                partition_data.edge_type_names,
                                                partition_data.partition_book,
                                                partition_data.node_features[dgl.NTYPE],
-                                               partition_data.all_shard_edges,
                                                keep_seed_nodes)
         graph_shard_manager_list.append(gsm)
         seed_nodes = gsm.input_nodes + partition_data.node_ranges[rank()][0]
@@ -211,7 +209,7 @@ def construct_full_graph(partition_data: PartitionData) -> GraphShardManager:
     seed_nodes = torch.arange(partition_data.node_ranges[rank()][1] -
                               partition_data.node_ranges[rank()][0])
     return GraphShardManager(graph_shard_list, seed_nodes, seed_nodes, partition_data.partition_book,
-                             partition_data.node_features[dgl.NTYPE], partition_data.all_shard_edges)
+                             partition_data.node_features[dgl.NTYPE])
     
 def convert_dist_graph(dist_graph: dgl.distributed.DistGraph) -> GraphShardManager:
     partition_data = load_dgl_partition_data_from_graph(dist_graph, dist_graph.device)
