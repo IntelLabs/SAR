@@ -182,13 +182,23 @@ class GraphShardManager:
     :type local_src_seeds: torch.Tensor
     :param local_tgt_seeds: The node indices of the output nodes relative to the starting node index of the local partition
     :type local_tgt_seeds: torch.Tensor
-
+    :param partition_book: The graph partition information
+    :type partition_book: dgl.distributed.GraphPartitionBook
+    :param node_types: tensor with node types in local partition
+    :type node_types: torch.Tensor
     """
 
-    def __init__(self, graph_shards: List[GraphShard], local_src_seeds: Tensor, local_tgt_seeds: Tensor) -> None:
+    def __init__(self,
+                 graph_shards: List[GraphShard],
+                 local_src_seeds: Tensor,
+                 local_tgt_seeds: Tensor,
+                 partition_book: dgl.distributed.GraphPartitionBook,
+                 node_types: Tensor) -> None:
         super().__init__()
         self.graph_shards = graph_shards
-
+        self.partition_book = partition_book
+        self.node_types = node_types
+        
         # source nodes and target nodes are all the same
         # srcdata, dstdata and ndata should be also the same
         self.src_is_tgt = local_src_seeds is local_tgt_seeds
@@ -225,6 +235,7 @@ class GraphShardManager:
         self.in_degrees_cache: Dict[Optional[str], Tensor] = {}
         self.out_degrees_cache: Dict[Optional[str], Tensor] = {}
 
+        # passing number of nodes and edges specific for current machine not whole distributed graph
         self.srcdata = ChainedDataView(self.num_src_nodes())
         self.edata = ChainedDataView(self.num_edges())
 
@@ -234,7 +245,78 @@ class GraphShardManager:
         else:
             self.dstdata = ChainedDataView(self.num_dst_nodes())
 
+        self._src_node_types_count_dict = {}
+        self._dst_node_types_count_dict = {}
+        self._edge_types_count_dict = {}             
+        self._ntypes_nums_calculated = False
+        self._etypes_nums_calculated = False
+        
         self._sampling_graph = None
+        
+    @property
+    def src_node_types_count_dict(self) -> Dict:
+        if self._ntypes_nums_calculated is False:
+            self._calculate_ntypes()
+            self._ntypes_nums_calculated = True
+        return self._src_node_types_count_dict
+        
+    @property
+    def dst_node_types_count_dict(self) -> Dict:
+        if self._ntypes_nums_calculated is False:
+            self._calculate_ntypes()
+            self._ntypes_nums_calculated = True
+        return self._dst_node_types_count_dict
+    
+    @property
+    def edge_types_count_dict(self) -> Dict:
+        if self._etypes_nums_calculated is False:
+            self._calculate_etypes()
+            self._etypes_nums_calculated = True
+        return self._edge_types_count_dict
+
+    @property
+    def ntypes(self) -> List[str]:
+        """
+        Returns list of node types in the local graph
+        """
+        return self.srctypes
+       
+    @property
+    def ntypes_global(self) -> List[str]:
+        """
+        Returns list of node types in the distributed graph
+        """
+        return self.partition_book.ntypes
+    
+    @property
+    def etypes(self) -> List[str]:
+        """
+        Returns list of edge types in the local graph
+        """
+        return [etype[1] for etype in self.edge_types_count_dict if
+                self.edge_types_count_dict[etype] > 0]
+    
+    @property
+    def etypes_global(self) -> List[str]:
+        """
+        Returns list of edge types in the distributed graph
+        """
+        return self.partition_book.etypes
+    
+    @property
+    def canonical_etypes(self) -> List[Tuple[str, str, str]]:
+        """
+        Returns list of canonical edge types in the local graph
+        """
+        return [etype for etype in self.edge_types_count_dict if
+                self.edge_types_count_dict[etype] > 0]
+    
+    @property
+    def canonical_etypes_global(self) -> List[Tuple[str, str, str]]:
+        """
+        Returns list of canonical edge types in the distributed graph
+        """
+        return self.partition_book.canonical_etypes
 
     @property
     def tgt_node_range(self) -> Tuple[int, int]:
@@ -247,6 +329,25 @@ class GraphShardManager:
     @property
     def node_ranges(self) -> List[Tuple[int, int]]:
         return [g_shard.src_range for g_shard in self.graph_shards]
+    
+    @property
+    def ndata(self):
+        assert self.src_is_tgt, "ndata shouldn't be used with MFGs"
+        return self.srcdata
+    
+    @property
+    def srctypes(self):
+        return [ntype for ntype in self.src_node_types_count_dict if
+                self.src_node_types_count_dict[ntype] > 0]
+    
+    @property
+    def dsttypes(self):
+        return [ntype for ntype in self.dst_node_types_count_dict if
+                self.dst_node_types_count_dict[ntype] > 0]
+
+    @property
+    def is_block(self):
+        return True
 
     @property
     def sampling_graph(self):
@@ -312,15 +413,6 @@ class GraphShardManager:
             self.dstdata = self.srcdata
         else:
             self.dstdata = self.dstdata.rewind()
-
-    @property
-    def ndata(self):
-        assert self.src_is_tgt, "ndata shouldn't be used with MFGs"
-        return self.srcdata
-
-    @property
-    def is_block(self):
-        return True
 
     def get_full_partition_graph(self,
                                  delete_shard_data: bool = True) -> DistributedBlock:
@@ -395,31 +487,118 @@ class GraphShardManager:
         return self
 
     def num_nodes(self, ntype=None) -> int:
-        return sum(x.graph.num_nodes(ntype) for x in self.graph_shards)
+        """
+        Returns the number of nodes of a given node type in the local partition.
+        If node type is not specified, returns the number of all nodes in the local partition.
+        Local nodes are the nodes in a given partition without HALO nodes.
+        
+        :param ntype: node type
+        :type ntype: str
+        """
+        if self.src_is_tgt:
+            if ntype is not None:
+                return self.src_node_types_count_dict[ntype].item()
+            return self.input_nodes.shape[0]
+        else:
+            return self.num_src_nodes(ntype)
+        
+    def num_nodes_global(self, ntype=None) -> int:
+        """
+        Returns the number of nodes of a given node type in the distributed graph.
+        If node type is not specified, returns the number of all nodes in the distributed graph.
+        
+        :param ntype: node type
+        :type ntype: str
+        """
+        if ntype is not None:
+            return self.partition_book._num_nodes(ntype)
+        return self.partition_book._num_nodes()
 
     def number_of_nodes(self, ntype=None) -> int:
+        """
+        Alias of :func:`num_nodes`
+        """
         return self.num_nodes(ntype)
+    
+    def number_of_nodes_global(self, ntype=None) -> int:
+        """
+        Alias of :func:`num_nodes_global`
+        """
+        return self.num_nodes_global(ntype)
 
     def num_src_nodes(self, ntype=None) -> int:
-        assert ntype is None, 'Node types not supported in GraphShardManager'
+        """
+        Returns the number of source nodes in the graph (local partition)
+        
+        :param ntype: node type
+        :type ntype: str
+        """
+        if ntype is not None:
+            return self.src_node_types_count_dict[ntype].item()
         return self.local_src_node_range[1] - self.local_src_node_range[0]
 
     def number_of_src_nodes(self, ntype=None) -> int:
+        """
+        Alias of :func:`num_src_nodes`
+        """
         return self.num_src_nodes(ntype)
 
     def num_dst_nodes(self, ntype=None) -> int:
-        assert ntype is None, 'Node types not supported in GraphShardManager'
+        """
+        Returns the number of destination nodes in the graph (local partition)
+        
+        :param ntype: node type
+        :type ntype: str
+        """
+        if ntype is not None:
+            return self.dst_node_types_count_dict[ntype].item()
         return self.tgt_node_range[1] - self.tgt_node_range[0]
 
     def number_of_dst_nodes(self, ntype=None) -> int:
+        """
+        Alias of :func:`num_dst_nodes`
+        """
         return self.num_dst_nodes(ntype)
-
-    def number_of_edges(self, etype=None) -> int:
-        return self.num_edges(etype)
-
+    
     def num_edges(self, etype=None) -> int:
+        """
+        Returns the number of edges of a given edge type in the local partition.
+        If edge type is not specified, returns the number of all edges in the local partition.
+        Local edges are the edges between nodes in the local partition and edges which are 
+        incoming from other partition (destination nodes are in the local partition)
+        
+        :param etype: edge type
+        :type etype: str
+        """
+        if etype is not None:
+            assert isinstance(etype, tuple) and len(etype) == 3, "etype must be passed as a canonical etype"
+            return self.edge_types_count_dict[etype]
         return sum(x.graph.num_edges(etype) for x in self.graph_shards)
-
+    
+    def num_edges_global(self, etype=None) -> int:
+        """
+        Returns the number of edges of a given edge type in the distributed graph.
+        If edge type is not specified, returns the number of all edges in the distributed graph.
+        
+        :param etype: edge type
+        :type etype: str
+        """
+        if etype is not None:
+            return self.partition_book._num_edges(etype)
+        return self.partition_book._num_edges()
+    
+    def number_of_edges(self, etype=None) -> int:
+        """
+        Alias of :func:`num_edges`
+        """
+        return self.num_edges(etype)
+    
+    def number_of_edges_global(self, etype=None) -> int:
+        """
+        Alias of :func:`num_edges_global`
+        """
+        return self.num_edges_global(etype)
+    
     def in_degrees(self, vertices=dgl.ALL, etype=None) -> Tensor:
         if etype not in self.in_degrees_cache:
             in_degrees = torch.zeros(
@@ -454,9 +633,31 @@ class GraphShardManager:
             return self.out_degrees_cache[etype]
 
         return self.out_degrees_cache[etype][vertices]
+    
+    def _calculate_ntypes(self):
+        src_node_types_unique, src_node_types_count = torch.unique(self.node_types[self.input_nodes], return_counts=True)
+        if self.src_is_tgt:
+            dst_node_types_unique, dst_node_types_count = torch.unique(self.node_types[self.seeds], return_counts=True)
+        else: 
+            # For MFGs we need to convert seeds from global to the local numbering
+            dst_node_types_unique, dst_node_types_count = torch.unique(self.node_types[self.seeds - self.tgt_node_range[0]], return_counts=True)
+        for ntype in self.partition_book.ntypes:
+            type_index = self.partition_book.ntypes.index(ntype)
+            self._src_node_types_count_dict[ntype] = src_node_types_count[(src_node_types_unique == type_index).nonzero().item()] if type_index in src_node_types_unique else 0
+            self._dst_node_types_count_dict[ntype] = dst_node_types_count[(dst_node_types_unique == type_index).nonzero().item()] if type_index in dst_node_types_unique else 0
+
+    def _calculate_etypes(self):
+        for canonical_etype in self.partition_book.canonical_etypes:
+                self._edge_types_count_dict[canonical_etype] = 0
+        for shard in self.graph_shards:
+            unique_type_ids, counts = torch.unique(shard.graph.edata[dgl.ETYPE], return_counts=True)
+            
+            for idx, unique_type_id in enumerate(unique_type_ids):
+                canonical_etype = self.canonical_etypes_global[unique_type_id]
+                self._edge_types_count_dict[canonical_etype] += counts[idx].item()  
+
 
     def _get_active_tensors(self, message_func):
-
         message_params = ()
         if callable(message_func):
             arg_spec = inspect.getfullargspec(message_func)

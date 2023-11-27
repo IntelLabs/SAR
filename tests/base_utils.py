@@ -39,9 +39,31 @@ def get_random_graph():
     return graph
 
 
+def get_random_hetero_graph():
+    """
+    Generates small heterogenous graph with node features and labels only for the first node type 
+    
+    :returns: dgl graph
+    """
+    graph_data = {
+        ("n_type_1", "rel_1", "n_type_1"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,))),
+        ("n_type_1", "rel_2", "n_type_3"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,))),
+        ("n_type_4", "rel_3", "n_type_2"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,))),
+        ("n_type_4", "rel_4", "n_type_1"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,))),
+        ("n_type_1", "rev-rel_1", "n_type_1"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,))),
+        ("n_type_3", "rev-rel_2", "n_type_1"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,))),
+        ("n_type_2", "rev-rel_3", "n_type_4"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,))),
+        ("n_type_1", "rev-rel_4", "n_type_4"): (torch.randint(0, 800, (1000,)), torch.randint(0, 800, (1000,)))
+    }
+    hetero_graph = dgl.heterograph(graph_data)
+    hetero_graph.nodes["n_type_1"].data["features"] = torch.rand((hetero_graph.num_nodes("n_type_1"), 10))        
+    hetero_graph.nodes["n_type_1"].data["labels"] = torch.randint(0, 10, (hetero_graph.num_nodes("n_type_1"),))
+    return hetero_graph
+
+
 def load_partition_data(rank, graph_name, tmp_dir):
     """
-    Boilerplate code for loading partition data
+    Boilerplate code for loading partition data with standard `full_graph_manager` (FGM)
 
     :param rank: Rank of the current machine
     :type rank: int
@@ -57,6 +79,30 @@ def load_partition_data(rank, graph_name, tmp_dir):
     features = sar.suffix_key_lookup(partition_data.node_features, 'features')
     labels = sar.suffix_key_lookup(partition_data.node_features, 'labels')
     return full_graph_manager, features, labels
+
+
+def load_partition_data_mfg(rank, graph_name, tmp_dir):
+    """
+    Boilerplate code for loading partition data with message flow graph (MFG)
+
+    :param rank: Rank of the current machine
+    :type rank: int
+    :param graph_name: Name of the partitioned graph
+    :type graph_name: str
+    :param tmp_dir: Path to the directory where partition data is located
+    :type tmp_dir: str
+    :returns: Tuple consisting of GraphShardManager object, partition features and labels
+    """
+    partition_file = os.path.join(tmp_dir, f'{graph_name}.json')
+    partition_data = sar.load_dgl_partition_data(partition_file, rank, "cpu")
+    blocks = sar.construct_mfgs(partition_data,
+                                (partition_data.node_features[dgl.NTYPE] == 0).nonzero(as_tuple=True)[0] +
+                                partition_data.node_ranges[sar.comm.rank()][0],
+                                3)
+    blocks = [block.to('cpu') for block in blocks]
+    features = sar.suffix_key_lookup(partition_data.node_features, 'features')
+    labels = sar.suffix_key_lookup(partition_data.node_features, 'labels')
+    return blocks, features, labels
 
 
 def synchronize_processes():
