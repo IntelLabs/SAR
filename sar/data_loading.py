@@ -72,7 +72,8 @@ def suffix_key_lookup(feature_dict: Dict[str, Tensor], key: str,
 
 def _mask_features_dict(edge_features: Dict[str, Tensor],
                         mask: Tensor, device: torch.device) -> Dict[str, Tensor]:
-    return {k: edge_features[k][mask].to(device) for k in edge_features}
+    #TODO(kpietkun): allow using edge features
+    return {k: edge_features[k][mask].to(device) for k in edge_features if k == dgl.ETYPE}
 
 
 def _get_type_ordered_edges(edge_mask: Tensor, edge_types: Tensor,
