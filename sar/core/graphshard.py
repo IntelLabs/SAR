@@ -174,12 +174,12 @@ class ChainedNodeDataView(ChainedDataView):
     def __getitem__(self, key: str) ->  Dict[str, Tensor]:
         return_tensor = super().__getitem__(key)
         if self.is_homogenous:
-            return return_tensor["_N"]
+            return return_tensor[DEFAULT_NTYPE]
         return return_tensor
 
     def __setitem__(self, key: str, value: Union[Tensor, Dict[str, Tensor]]):
         if len(self._valid_types) == 1 and len(self._valid_counts) == 1 and not isinstance(value, Dict):
-            value = {"_N": value}
+            value = {DEFAULT_NTYPE: value}
         assert isinstance(value, Dict), \
             "Graph has more than one node type, please specify node type and the data through a dict"
         for ntype, val in value.items():
@@ -207,12 +207,12 @@ class ChainedEdgeDataView(ChainedDataView):
     def __getitem__(self, key: str) ->  Dict[str, Tensor]:
         return_tensor = super().__getitem__(key)
         if self.is_homogenous:
-            return return_tensor["_E"]
+            return return_tensor[DEFAULT_ETYPE]
         return return_tensor
     
     def __setitem__(self, key: str, value: Union[Tensor, Dict[str, Tensor]]):
         if len(self._valid_types) == 1 and len(self._valid_counts) == 1 and not isinstance(value, Dict):
-            value = {"_E": value}
+            value = {DEFAULT_ETYPE: value}
         assert isinstance(value, Dict), \
             "Graph has more than one edge type, please specify edge type and the data through a dict"
         for etype, val in value.items():
@@ -518,7 +518,7 @@ class GraphShardManager:
         """
         Returns the number of edges in the GraphShardManager in the local partition.
         Since GraphShardManager is responsible for only one relation, specified etype should be equal
-        to that relation or to "_E", or should be set to "None".
+        to that relation or to ('_N', '_E', '_N'), or should be set to "None".
         
         Local edges are the edges between nodes in the local partition and edges which are 
         incoming from other partition (destination nodes are in the local partition)
@@ -776,7 +776,7 @@ class GraphShardManager:
         """
         GraphShardManager is responsible for managing only one relation. Because of that
         functions that allow to specify etype are allowd only to take this exact etype as the argument
-        or  DEFAULT_ETYPE ("_E") type or simply "None"
+        or  DEFAULT_ETYPE ('_N', '_E', '_N') type or simply "None"
         """
         if isinstance(etype, tuple):
             etype = etype[1]
