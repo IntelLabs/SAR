@@ -163,17 +163,16 @@ def infer_pass(gnn_model: torch.nn.Module,
         # The seed nodes for the eval MFGs are
         # torch.cat((masks['train_indices'],masks['val_indices'],masks['test_indices']))
         # These will be the nodes produced by the top layer MFG
-        start_index = 0
-        for indices_name in ['train_indices', 'val_indices', 'test_indices']:
-            active_indices = masks[indices_name]
-            active_logits = logits[start_index:  start_index + active_indices.numel()]
-            if active_indices.numel() > 0:
+        for mask_name in ['train_mask', 'val_mask', 'test_mask']:
+            masked_nodes = masks[mask_name]
+            if masked_nodes.sum() > 0:
+                active_logits = logits[masked_nodes]
+                active_labels = labels[masked_nodes]
                 loss = F.cross_entropy(active_logits,
-                                       labels[active_indices], reduction='sum')
+                                       active_labels, reduction='sum')
                 n_correct = (active_logits.argmax(1) ==
-                             labels[active_indices]).float().sum()
-                results.extend([loss.item(), n_correct.item(), active_indices.numel()])
-                start_index += active_indices.numel()
+                             active_labels).float().sum()
+                results.extend([loss.item(), n_correct.item(), masked_nodes.sum().item()])
             else:
                 results.extend([0.0, 0.0, 0.0])
     else:  # No MFGs were constructed. We are using the full graph in each layer
@@ -286,6 +285,14 @@ def main():
     # the node type to the mask names. So we use the convenience function
     # suffix_key_lookup to look up the mask name while ignoring the
     # arbitrary node type
+    bool_mask = {}
+    for mask_name in ['train_mask', 'val_mask', 'test_mask']:
+        bool_mask[mask_name] = sar.suffix_key_lookup(partition_data.node_features,
+                                                     mask_name,
+                                                     expand_to_all = False,
+                                                     type_list = partition_data.node_type_names)
+        bool_mask[mask_name] = bool_mask[mask_name].bool()
+        
     masks = {}
     for mask_name, indices_name in zip(['train_mask', 'val_mask', 'test_mask'],
                                        ['train_indices', 'val_indices', 'test_indices']):
@@ -375,7 +382,7 @@ def main():
                    optimizer,
                    train_blocks,
                    features,
-                   masks['train_indices'],
+                   bool_mask['train_mask'],
                    labels,
                    n_train_points,
                    args.construct_mfgs)
@@ -385,7 +392,7 @@ def main():
             infer_pass(gnn_model,
                        eval_blocks,
                        features,
-                       masks,
+                       bool_mask,
                        labels,
                        args.construct_mfgs)
 
