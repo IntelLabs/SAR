@@ -685,7 +685,7 @@ class GraphShardManager:
         result_val = sar_op(aggregation_data, *all_input_tensors)
         if mean_postprocess:
             in_degrees = self.in_degrees()
-            in_degrees[in_degrees == 0] = 1
+            in_degrees = torch.where(in_degrees == 0, torch.ones_like(in_degrees), in_degrees)
             in_degrees = in_degrees.view([-1] + [1] * (result_val.ndim - 1))
             result_val = result_val / in_degrees
 
