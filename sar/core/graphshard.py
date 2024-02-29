@@ -326,10 +326,6 @@ class GraphShardManager:
         self._in_degrees_cache = None
         self._out_degrees_cache = None
         self._num_edges_cache = None
-        if self.src_is_tgt:
-            self._num_all_nodes = self.input_nodes.shape[0]
-        else:
-            self._num_all_nodes = torch.unique(torch.cat((self.input_nodes, self.seeds - self.tgt_node_range[0]))).shape[0]
                                
     def __getattr__(self, attr):
         if hasattr(self.parent_hgsm, attr):
@@ -378,7 +374,7 @@ class GraphShardManager:
     @property
     def canonical_etypes(self) -> List[Tuple[str, str, str]]:
         """
-        Returns canonical edge type represented by GraphShardManager in alist
+        Returns canonical edge type represented by GraphShardManager in a list
         """
         return [self.canonical_relation]
     
@@ -435,30 +431,18 @@ class GraphShardManager:
         return sampling_graph
 
     def nodes(self, ntype: str = None) -> Tensor:
-        if ntype is None:
-            if len(self.canonical_relation[0] != self.canonical_relation[2]):
-                raise RuntimeError("Node type must be specified if the graph consists of more than one node type")
-        if ntype == self.canonical_relation[0]:
-            return self.input_nodes
-        return self.seeds if self.src_is_tgt else self.seeds - self.tgt_node_range[0]
+        self._validate_ntype(ntype)
+        if ntype == None and self.canonical_relation[0] == self.canonical_relation[1]:
+            ntype = self.canonical_relation[0]
+        return self.parent_hgsm.nodes(ntype)
         
     def srcnodes(self, ntype: str = None) -> Tensor:
-        if ntype is None:
-            if len(self.srctypes) == 1:
-                return self.input_nodes
-            raise RuntimeError("Node type must be specified if the graph consists of more than one node source type")
-        if ntype == self.canonical_relation[0]:
-            return self.input_nodes
-        raise KeyError(f"Cannot find node with specified node type: '{ntype}'")
+        self._validate_ntype(ntype, allow_dst=False)
+        return self.parent_hgsm.srcnodes(self.canonical_relation[0])
         
     def dstnodes(self, ntype: str = None) -> Tensor:
-        if ntype is None:
-            if len(self.dsttypes) == 1:
-                return self.seeds if self.src_is_tgt else self.seeds - self.node_ranges[rank()][0]
-            raise RuntimeError("Node type must be specified if the graph consists of more than one node destination type")
-        if ntype == self.canonical_relation[2]:
-            return self.seeds if self.src_is_tgt else self.seeds - self.node_ranges[rank()][0]
-        raise KeyError(f"Cannot find node with specified node type: '{ntype}'")
+        self._validate_ntype(ntype, allow_src=False)
+        return self.parent_hgsm.dstnodes(self.canonical_relation[2])
 
     def num_nodes(self, ntype: str = None) -> int:
         """
@@ -470,11 +454,13 @@ class GraphShardManager:
         :type ntype: str
         """
         self._validate_ntype(ntype)
-        if ntype == self.canonical_relation[0]:
-            return self.num_src_nodes(ntype)
-        if ntype == self.canonical_relation[2]:
-            return self.num_dst_nodes(ntype)
-        return self._num_all_nodes
+        if ntype == None:
+            if self.canonical_relation[0] == self.canonical_relation[2]:
+                return self.parent_hgsm.num_nodes(self.canonical_relation[0])
+            else:
+                return self.parent_hgsm.num_nodes(self.canonical_relation[0]) + \
+                    self.parent_hgsm.num_nodes(self.canonical_relation[2])
+        return self.parent_hgsm.num_nodes(ntype)
 
     def number_of_nodes(self, ntype: str = None) -> int:
         """
@@ -490,7 +476,7 @@ class GraphShardManager:
         :type ntype: str
         """
         self._validate_ntype(ntype, allow_dst=False)
-        return self.input_nodes.shape[0]
+        return self.parent_hgsm.num_src_nodes(self.canonical_relation[0])
 
     def number_of_src_nodes(self, ntype: str = None) -> int:
         """
@@ -506,7 +492,7 @@ class GraphShardManager:
         :type ntype: str
         """
         self._validate_ntype(ntype, allow_src=False)
-        return self.seeds.shape[0]
+        return self.parent_hgsm.num_dst_nodes(self.canonical_relation[2])
 
     def number_of_dst_nodes(self, ntype: str = None) -> int:
         """
@@ -518,10 +504,10 @@ class GraphShardManager:
         """
         Returns the number of edges in the GraphShardManager in the local partition.
         Since GraphShardManager is responsible for only one relation, specified etype should be equal
-        to that relation or to ('_N', '_E', '_N'), or should be set to "None".
+        to that relation, or should be set to "None".
         
         Local edges are the edges between nodes in the local partition and edges which are 
-        incoming from other partition (destination nodes are in the local partition)
+        incoming from other partitions (destination nodes are in the local partition)
         
         :param etype: edge type specified by a string or a string triplet (canonical form)
         :type etype: Union[str, Tuple[str, str, str]]
@@ -776,13 +762,12 @@ class GraphShardManager:
         """
         GraphShardManager is responsible for managing only one relation. Because of that
         functions that allow to specify etype are allowd only to take this exact etype as the argument
-        or  DEFAULT_ETYPE ('_N', '_E', '_N') type or simply "None"
+        or simply "None"
         """
         if isinstance(etype, tuple):
             etype = etype[1]
             
         if (etype == self.etypes[0]) or \
-            (etype == DEFAULT_ETYPE) or \
             (etype == None):
             return
         raise RuntimeError(f'Edge type "{etype}" does not exist.')
@@ -790,11 +775,10 @@ class GraphShardManager:
     def _validate_ntype(self, ntype: str, allow_src: bool = True, allow_dst: bool = True) -> None:
         """
         GraphShardManager is responsible for managing only one relation. Because of that
-        functions that allow to specify ntype are allowd only to take srctype, dsttype, 
-        DEFAULT_NTYPE ("_N") type or simply "None"
+        functions that allow to specify ntype are allowed only to take srctype, dsttype
+        or simply "None"
         """
-        if (ntype == DEFAULT_NTYPE) or \
-            (ntype == self.srctypes[0] and allow_src) or \
+        if (ntype == self.srctypes[0] and allow_src) or \
             (ntype == self.dsttypes[0] and allow_dst) or \
             (ntype == None):
             return
@@ -1038,15 +1022,9 @@ class HeteroGraphShardManager:
         :param ntype: node type
         :type ntype: str
         """
-        if self.src_is_tgt:
-            if ntype is not None:
-                return self._src_node_types_indices_dict[ntype].shape[0] 
-            return self.input_nodes.shape[0]
-        elif self.tgt_in_src:
-            return self.num_src_nodes(ntype) 
-        elif ntype is None:
-            return sum([v.shape[0] for _, v in self._all_node_types_indices_dict.items()])
-        return self._all_node_types_indices_dict[ntype].shape[0]
+        if ntype is not None:
+            return self._all_node_types_indices_dict[ntype].shape[0]
+        return sum([all_indices.shape[0] for all_indices in self._all_node_types_indices_dict.values()])
     
     @_gsm_function
     def num_nodes_global(self, ntype: str = None) -> int:
@@ -1213,7 +1191,7 @@ class HeteroGraphShardManager:
         by a string triplet ``(str, str, str)``, where the first element is a source node type,
         second one is an edge type, and the third one is a destination node type.
         If etype is already represented by its canonical form, then the functions returns 
-        input etype as the output.
+        input as the output.
         
         :param etype: edge type, for which canonical form will be returned
         :type etype: Union[str, Tuple[str, str, str]]
@@ -1235,10 +1213,10 @@ class HeteroGraphShardManager:
 
     def _update_node_type_indices_dicts(self):
         local_seeds = self.seeds if self.src_is_tgt else self.seeds - self.node_ranges[rank()][0]
-        if self.tgt_in_src is False:
-            all_nodes = torch.unique(torch.cat((local_seeds, self.input_nodes)))
-        else:
+        if self.tgt_in_src is True:
             all_nodes = self.input_nodes
+        else:
+            all_nodes = torch.unique(torch.cat((local_seeds, self.input_nodes)))
             
         for ntype in self._partition_book.ntypes:
             type_index = self._partition_book.ntypes.index(ntype)
@@ -1260,7 +1238,7 @@ class HeteroGraphShardManager:
 
     def _construct_data_views(self):
         valid_src_entries = []
-        for ntype in self.ntypes:
+        for ntype in self.srctypes:
             valid_src_entries.append(((ntype), self.num_src_nodes(ntype)))
         valid_edge_entries = []
         for canonical_etype in self.canonical_etypes:
@@ -1272,6 +1250,6 @@ class HeteroGraphShardManager:
             self.dstdata = self.srcdata
         else:
             valid_dst_entries = []
-            for ntype in self.ntypes:
+            for ntype in self.dsttypes:
                 valid_dst_entries.append(((ntype), self.num_dst_nodes(ntype)))
             self.dstdata = ChainedNodeDataView(valid_dst_entries)
