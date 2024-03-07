@@ -91,7 +91,7 @@ class GNNModel(nn.Module):
             dgl.nn.SAGEConv(hidden_dim, out_dim, aggregator_type='mean'),
         ])
 
-    def forward(self,  graph: sar.GraphShardManager, features: torch.Tensor):
+    def forward(self,  graph: sar.HeteroGraphShardManager, features: torch.Tensor):
         for idx, conv in enumerate(self.convs):
             features = conv(graph, features)
             if idx < len(self.convs) - 1:

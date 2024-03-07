@@ -21,10 +21,10 @@
 '''
 Modules for sharded data representation and management
 '''
-from .graphshard import GraphShard, GraphShardManager
+from .graphshard import GraphShard, GraphShardManager, HeteroGraphShardManager
 from .sar_aggregation import message_has_parameters
 from .full_partition_block import DistributedBlock
 from .sampling import DistNeighborSampler, DataLoader
 
-__all__ = ['GraphShard', 'GraphShardManager', 'message_has_parameters', 'DistributedBlock',
-           'DistNeighborSampler', 'DataLoader']
+__all__ = ['GraphShard', 'GraphShardManager', 'HeteroGraphShardManager', 'message_has_parameters',
+           'DistributedBlock', 'DistNeighborSampler', 'DataLoader']

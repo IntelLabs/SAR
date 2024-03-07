@@ -20,6 +20,7 @@
 
 from argparse import ArgumentParser
 import dgl  # type:ignore
+from dgl import AddReverse, Compose, ToSimple
 import torch
 from ogb.nodeproppred import DglNodePropPredDataset  # type:ignore
 from dgl.data import (
@@ -113,6 +114,10 @@ def main():
         graph = dgl.remove_self_loop(graph)
         graph = dgl.to_bidirected(graph, copy_ndata=True)
         graph = dgl.add_self_loop(graph)
+    else:
+        
+        transform = Compose([ToSimple(), AddReverse()])
+        graph = transform(graph)
 
     prepare_features(args, dataset, graph)
     balance_ntypes = graph.ndata["train_mask"] \

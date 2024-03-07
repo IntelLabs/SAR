@@ -19,35 +19,42 @@ def handle_mp_exception(mp_dict):
     pytest.fail(str(msg), pytrace=False)
 
 
-def run_workers(func, world_size, *args, **kwargs):
+def run_workers(func, fixture_env, world_size, *args, **kwargs):
     """
     Starts `world_size` number of processes, where each of them
     behaves as a separate worker and invokes function specified 
-    by the parameter.
+    by the parameter. This function should be an entry point to the
+    'independent' process. It has to simulate behaviour of SAR which
+    will be spawned across different machines independently from other
+    instances. Each process have individual memory space so it is
+    suitable environment for testing SAR.
     
     :param func: The function that will be invoked by each process. It should take four
     parameters: mp_dict - shared dictionary between different processes, rank - of the current machine,
     world_size - number of workers, tmp_dir - path to the working directory (additionaly one can pass args and kwargs)
     :type func: function
+    :param fixture_env: named tuple with all of the necessary information about preapred environment for the tests
+    :type fixture_env: FixtureEnv
+    :param world_size: number of workers
+    :type world_size: int
     :returns: mp_dict which can be used by workers to return
     results from `func`
     """
     manager = mp.Manager()
     mp_dict = manager.dict()
     processes = []
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        for rank in range(1, world_size):
-            my_args = (mp_dict, rank, world_size, tmp_dir) + args
-            p = mp.Process(target=func, args=my_args, kwargs=kwargs)
-            p.daemon = True
-            p.start()
-            processes.append(p)
-        func(mp_dict, 0, world_size, tmp_dir, *args, **kwargs)
-        
-        for p in processes:
-            p.join()
-        if 'exception' in mp_dict:
-            handle_mp_exception(mp_dict)
+    for rank in range(1, world_size):
+        my_args = (mp_dict, rank, world_size, fixture_env) + args
+        p = mp.Process(target=func, args=my_args, kwargs=kwargs)
+        p.daemon = True
+        p.start()
+        processes.append(p)
+    func(mp_dict, 0, world_size, fixture_env, *args, **kwargs)
+    
+    for p in processes:
+        p.join()
+    if 'exception' in mp_dict:
+        handle_mp_exception(mp_dict)
     return mp_dict
 
     

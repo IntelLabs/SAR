@@ -1,160 +1,276 @@
 from multiprocessing_utils import *
+from constants import *
 import os
-import tempfile
-import traceback
-import numpy as np
 # Do not import DGL and SAR - these modules should be
 # independently loaded inside each process
 
 
-def sar_process(mp_dict, rank, world_size, tmp_dir):
-    """
-    This function should be an entry point to the 'independent' process.
-    It has to simulate behaviour of SAR which will be spawned across different
-    machines independently from other instances. Each process have individual memory space
-    so it is suitable environment for testing SAR.
-    """
-    import dgl
-    import torch
-    import sar
-    from models import GNNModel
-
-    try:
-        if rank == 0:
-            # partitioning takes place offline, however
-            # for testing random graph is needed - only master node should do this
-            # random graph partitions will be then placed in temporary directory
-            graph = dgl.rand_graph(1000, 2500)
-            graph = dgl.add_self_loop(graph)
-            graph.ndata.clear()
-            graph.ndata['features'] = torch.rand((graph.num_nodes(), 1))
-
-            dgl.distributed.partition_graph(
-                graph,
-                'random_graph',
-                world_size,
-                tmp_dir,
-                num_hops=1,
-                balance_edges=True)
-
-        part_file = os.path.join(tmp_dir, 'random_graph.json')
-        ip_file = os.path.join(tmp_dir, 'ip_file')
-
-        master_ip_address = sar.nfs_ip_init(rank, ip_file)
-
-        sar.initialize_comms(rank,
-                             world_size,
-                             master_ip_address,
-                             'ccl')
-
-        partition_data = sar.load_dgl_partition_data(
-            part_file, rank, 'cpu')
-
-        full_graph_manager = sar.construct_full_graph(partition_data).to('cpu')
-        features = sar.suffix_key_lookup(partition_data.node_features, 'features')
-        del partition_data
-
-        model = GNNModel(features.size(1), features.size(1)).to('cpu')
-        sar.sync_params(model)
-
-        logits = model(full_graph_manager, features)
-
-        # put calculated results in multiprocessing dictionary
-        mp_dict[f"result_{rank}"] = logits.detach()
-
-        if rank == 0:
-            # only rank 0 is runned within parent process
-            # return used model and generated graph to caller
-            return model, graph
-
-    except Exception as e:
-        mp_dict['traceback'] = str(traceback.format_exc())
-        mp_dict['exception'] = e
-        return None, None
-
-
-@pytest.mark.parametrize('world_size', [2, 4])
+@pytest.mark.parametrize("backend", ["ccl", "gloo"])
+@pytest.mark.parametrize('world_size', [1, 2, 4, 8])
 @sar_test
-def test_sar_full_graph(world_size):
+def test_homogeneous_fgm(world_size, backend, fixture_env):
     """
-    Partition graph into `world_size` partitions and run `world_size`
-    processes which perform full graph inference using SAR algorithm.
+    Perform full graph inference using SAR algorithm on homogeneous graph.
     Test is comparing mean of concatenated results from all processes
     with mean of native DGL full graph inference result.
     """
-    print(world_size)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        manager = mp.Manager()
-        mp_dict = manager.dict()
+    import torch
+    def homogeneous_fgm(mp_dict, rank, world_size, fixture_env, **kwargs):
+        import sar
+        from models import GNNModel
+        from base_utils import initialize_worker, load_partition_data
 
-        processes = []
-        for rank in range(1, world_size):
-            p = mp.Process(target=sar_process, args=(mp_dict, rank, world_size, tmpdir))
-            p.daemon = True
-            p.start()
-            processes.append(p)
+        temp_dir = fixture_env.temp_dir
+        initialize_worker(rank, world_size, temp_dir, backend=kwargs["backend"])
+        fgm, feat, labels = load_partition_data(rank, HOMOGENEOUS_GRAPH_NAME,
+                                                os.path.join(temp_dir, f"homogeneous_{world_size}"))
+        model = GNNModel(feat.shape[1], feat.shape[1], labels.max()+1).to('cpu')
+        sar.sync_params(model)
+        model.eval()
+        sar_logits = model(fgm, feat)
 
-        model, graph = sar_process(mp_dict, 0, world_size, tmpdir)
+        mp_dict[f"result_{rank}"] = sar_logits.detach()
+        if rank == 0:
+            mp_dict["model"] = model
+            mp_dict["graph"] = fixture_env.homo_graph
+            mp_dict["node_map"] = fixture_env.node_map[f"homogeneous_{world_size}"]
 
-        for p in processes:
-            p.join()
+    mp_dict = run_workers(homogeneous_fgm, fixture_env, world_size, backend=backend)
+    
+    model = mp_dict["model"]
+    graph = mp_dict["graph"]
+    dgl_logits = model(graph, graph.ndata['features']).detach()
+    dgl_logits_mean = dgl_logits.mean(axis=1)
 
-        if 'exception' in mp_dict:
-            handle_mp_exception(mp_dict)
+    sar_logits = torch.tensor([])
+    for rank in range(world_size):
+        sar_logits = torch.cat((sar_logits, mp_dict[f"result_{rank}"]))
+    sar_logits[mp_dict["node_map"]] = sar_logits.clone()
+    sar_logits_mean = sar_logits.mean(axis=1)
 
-        out = model(graph, graph.ndata['features']).detach().numpy()
+    assert torch.all(torch.isclose(dgl_logits_mean, sar_logits_mean, atol=1e-6, rtol=1e-6))
 
-        # compare mean of all values instead of each node feature individually
-        # TODO: reorder SAR calculated logits to original NID mapping 
-        full_graph_mean = out.mean()
-
-        sar_logits = mp_dict["result_0"].numpy()
-        for rank in range(1, world_size):
-            rank_logits = mp_dict[f"result_{rank}"].numpy()
-            sar_logits = np.concatenate((sar_logits, rank_logits))
-
-        sar_logits_mean = sar_logits.mean()
-
-        rtol = abs(sar_logits_mean) / 1000
-        assert full_graph_mean == pytest.approx(sar_logits_mean, rtol)
-
+@pytest.mark.parametrize("backend", ["ccl", "gloo"])
+@pytest.mark.parametrize('world_size', [1, 2, 4, 8])
 @sar_test
-def test_convert_dist_graph():
+def test_heterogeneous_fgm(world_size, backend, fixture_env):
+    """
+    Perform full graph inference using SAR algorithm on heterogeneous graph.
+    Test is comparing mean of concatenated results from all processes
+    with mean of native DGL full graph inference result.
+    """
+    import torch
+    from models import rel_graph_embed
+    def heterogeneous_fgm(mp_dict, rank, world_size, fixture_env, **kwargs):
+        import sar
+        from models import HeteroGNNModel, extract_embed
+        from base_utils import initialize_worker, load_partition_data
+
+        temp_dir = fixture_env.temp_dir
+        initialize_worker(rank, world_size, temp_dir, backend=kwargs["backend"])
+        fgm, feats, labels = load_partition_data(rank, HETEROGENEOUS_GRAPH_NAME,
+                                                os.path.join(temp_dir, f"heterogeneous_{world_size}"))
+        model = HeteroGNNModel(fgm, feats.shape[1], feats.shape[1], labels.max()+1).to('cpu')
+        model.eval()
+        sar.sync_params(model)
+        
+        to_extract = {}
+        node_map = fixture_env.node_map[f"heterogeneous_{world_size}"]
+        for ntype in fgm.srctypes:
+            if ntype == "n_type_1":
+                continue
+            down_lim = fgm._partition_book.partid2nids(rank, ntype).min()
+            up_lim = fgm._partition_book.partid2nids(rank+1, ntype).min() if rank+1 < world_size else None
+            ids = node_map[ntype][down_lim:up_lim]
+            to_extract[ntype] = ids
+        
+        embed_layer = kwargs["embed_layer"]
+        embeds = extract_embed(embed_layer, to_extract, skip_type="n_type_1")
+        embeds.update({"n_type_1": feats[fgm.srcnodes("n_type_1")]})
+        embeds = {k: e.to("cpu") for k, e in embeds.items()}
+        
+        sar_logits = model(fgm, embeds)
+        sar_logits = sar_logits["n_type_1"]
+
+        mp_dict[f"result_{rank}"] = sar_logits.detach()
+        if rank == 0:
+            mp_dict["model"] = model
+            mp_dict["node_map"] = fixture_env.node_map[f"heterogeneous_{world_size}"]
+
+    graph = fixture_env.hetero_graph
+    max_num_nodes = {ntype: graph.num_nodes(ntype) for ntype in graph.ntypes}
+    embed_layer = rel_graph_embed(graph, graph.ndata["features"]["n_type_1"].shape[1],
+                                  num_nodes_dict=max_num_nodes,
+                                  skip_type="n_type_1").to('cpu')
+    mp_dict = run_workers(heterogeneous_fgm, fixture_env, world_size, backend=backend,
+                          embed_layer=embed_layer)
+    
+    embeds = embed_layer.weight
+    embeds.update({"n_type_1": graph.ndata["features"]["n_type_1"]})
+    embeds = {k: e.to("cpu") for k, e in embeds.items()}
+    
+    model = mp_dict["model"]
+    dgl_logits = model(graph, embeds)
+    dgl_logits = dgl_logits["n_type_1"].detach()
+    dgl_logits_mean = dgl_logits.mean(axis=1)
+
+    sar_logits = torch.tensor([])
+    for rank in range(world_size):
+        sar_logits = torch.cat((sar_logits, mp_dict[f"result_{rank}"]))
+    sar_logits[mp_dict["node_map"]["n_type_1"]] = sar_logits.clone()
+    sar_logits_mean = sar_logits.mean(axis=1)
+    
+    assert torch.all(torch.isclose(dgl_logits_mean, sar_logits_mean, atol=1e-6, rtol=1e-6))
+
+
+@pytest.mark.parametrize("backend", ["ccl", "gloo"])
+@pytest.mark.parametrize("world_size", [1, 2, 4, 8])
+@sar_test
+def test_homogeneous_mfg(world_size, backend, fixture_env):
+    """
+    Perform full graph inference using SAR algorithm on homogeneous graph.
+    Script is using Message Flow Graph (mfg). Test is comparing mean of
+    concatenated results from all processes with mean of native DGL full
+    graph inference result.
+    """
+    import torch
+    def homogeneous_mfg(mp_dict, rank, world_size, fixture_env, **kwargs):
+        import sar
+        from models import GNNModel
+        from base_utils import initialize_worker, load_partition_data_mfg
+        
+        temp_dir = fixture_env.temp_dir
+        initialize_worker(rank, world_size, temp_dir, backend=kwargs["backend"])
+        blocks, feat, labels = load_partition_data_mfg(rank, HOMOGENEOUS_GRAPH_NAME,
+                                                       os.path.join(temp_dir, f"homogeneous_{world_size}"))
+        model = GNNModel(feat.shape[1], feat.shape[1], labels.max()+1).to('cpu')
+        sar.sync_params(model)
+        model.eval()
+        sar_logits = model(blocks, feat)
+
+        mp_dict[f"result_{rank}"] = sar_logits.detach()
+        if rank == 0:
+            mp_dict["model"] = model
+            mp_dict["graph"] = fixture_env.homo_graph
+            mp_dict["node_map"] = fixture_env.node_map[f"homogeneous_{world_size}"]
+            
+    mp_dict = run_workers(homogeneous_mfg, fixture_env, world_size, backend=backend)
+
+    model = mp_dict["model"]
+    graph = mp_dict["graph"]
+    dgl_logits = model(graph, graph.ndata['features']).detach()
+    dgl_logits_mean = dgl_logits.mean(axis=1)
+
+    sar_logits = torch.tensor([])
+    for rank in range(world_size):
+        sar_logits = torch.cat((sar_logits, mp_dict[f"result_{rank}"]))
+    sar_logits[mp_dict["node_map"]] = sar_logits.clone()
+    sar_logits_mean = sar_logits.mean(axis=1)
+
+    assert torch.all(torch.isclose(dgl_logits_mean, sar_logits_mean, atol=1e-6, rtol=1e-6))
+
+
+@pytest.mark.parametrize("backend", ["ccl", "gloo"])
+@pytest.mark.parametrize('world_size', [1, 2, 4, 8])
+@sar_test
+def test_heterogeneous_mfg(world_size, backend, fixture_env):
+    """
+    Perform full graph inference using SAR algorithm on heterogeneous graph.
+    Script is using Message Flow Graph (mfg). Test is comparing mean of
+    concatenated results from all processes with mean of native DGL full
+    graph inference result.
+    """
+    import torch
+    from models import rel_graph_embed
+    def heterogeneous_mfg(mp_dict, rank, world_size, fixture_env, **kwargs):
+        import sar
+        from models import HeteroGNNModel, extract_embed
+        from base_utils import initialize_worker, load_partition_data_mfg
+
+        temp_dir = fixture_env.temp_dir
+        initialize_worker(rank, world_size, temp_dir, backend=kwargs["backend"])
+
+        blocks, feats, labels = load_partition_data_mfg(rank, HETEROGENEOUS_GRAPH_NAME,
+                                                        os.path.join(temp_dir, f"heterogeneous_{world_size}"))
+        model = HeteroGNNModel(blocks[0], feats.shape[1], feats.shape[1], labels.max()+1).to('cpu')
+        model.eval()
+        sar.sync_params(model)
+        
+        to_extract = {}
+        node_map = fixture_env.node_map[f"heterogeneous_{world_size}"]
+        for ntype in blocks[0].srctypes:
+            if ntype == "n_type_1":
+                continue
+            down_lim = blocks[0]._partition_book.partid2nids(rank, ntype).min()
+            up_lim = blocks[0]._partition_book.partid2nids(rank+1, ntype).min() if rank+1 < world_size else None
+            ids = node_map[ntype][down_lim:up_lim]
+            to_extract[ntype] = ids[blocks[0].srcnodes(ntype)]
+        
+        embed_layer = kwargs["embed_layer"]
+        embeds = extract_embed(embed_layer, to_extract, skip_type="n_type_1")
+        embeds.update({"n_type_1": feats[blocks[0].srcnodes("n_type_1")]})
+        embeds = {k: e.to("cpu") for k, e in embeds.items()}
+        
+        sar_logits = model(blocks, embeds)
+        sar_logits = sar_logits["n_type_1"]
+
+        mp_dict[f"result_{rank}"] = sar_logits.detach()
+        if rank == 0:
+            mp_dict["model"] = model
+            mp_dict["node_map"] = fixture_env.node_map[f"heterogeneous_{world_size}"]
+
+    graph = fixture_env.hetero_graph
+    max_num_nodes = {ntype: graph.num_nodes(ntype) for ntype in graph.ntypes}
+    embed_layer = rel_graph_embed(graph, graph.ndata["features"]["n_type_1"].shape[1],
+                                  num_nodes_dict=max_num_nodes,
+                                  skip_type="n_type_1").to('cpu')
+    mp_dict = run_workers(heterogeneous_mfg, fixture_env, world_size, backend=backend,
+                          embed_layer=embed_layer)
+
+    embeds = embed_layer.weight
+    embeds.update({"n_type_1": graph.ndata["features"]["n_type_1"]})
+    embeds = {k: e.to("cpu") for k, e in embeds.items()}
+    
+    model = mp_dict["model"]
+    dgl_logits = model(graph, embeds)
+    dgl_logits = dgl_logits["n_type_1"].detach()
+    dgl_logits_mean = dgl_logits.mean(axis=1)
+
+    sar_logits = torch.tensor([])
+    for rank in range(world_size):
+        sar_logits = torch.cat((sar_logits, mp_dict[f"result_{rank}"]))
+    sar_logits[mp_dict["node_map"]["n_type_1"]] = sar_logits.clone()
+    sar_logits_mean = sar_logits.mean(axis=1)
+    
+    assert torch.all(torch.isclose(dgl_logits_mean, sar_logits_mean, atol=1e-6, rtol=1e-6))
+
+
+@pytest.mark.parametrize("backend", ["ccl"])
+@pytest.mark.parametrize('world_size', [1])
+@sar_test
+def test_convert_dist_graph(world_size, backend, fixture_env):
     """
     Create DGL's DistGraph object with random graph partitioned into
     one part (only way to test DistGraph locally). Then perform converting
     DistGraph into SAR GraphShardManager and check relevant properties.
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
+    def convert_dist_graph(mp_dict, rank, world_size, fixture_env, **kwargs):
         import dgl
-        import torch
         import sar
-        graph_name = 'random_graph'
-        part_file = os.path.join(tmpdir, 'random_graph.json')
-        ip_file = os.path.join(tmpdir, 'ip_file')
-        g = dgl.rand_graph(1000, 2500)
-        g = dgl.add_self_loop(g)
-        g.ndata.clear()
-        g.ndata['features'] = torch.rand((g.num_nodes(), 1))
-        dgl.distributed.partition_graph(
-            g,
-            'random_graph',
-            1,
-            tmpdir,
-            num_hops=1,
-            balance_edges=True)
-        
-        master_ip_address = sar.nfs_ip_init(_rank=0, ip_file=ip_file)
-        sar.initialize_comms(_rank=0, _world_size=1,
-                             master_ip_address=master_ip_address, backend='ccl')
+        from base_utils import initialize_worker
 
+        temp_dir = fixture_env.temp_dir
+        partition_file = os.path.join(temp_dir, f'homogeneous_{world_size}', f"{HOMOGENEOUS_GRAPH_NAME}.json")
+        initialize_worker(rank, world_size, temp_dir, backend=kwargs["backend"])
         dgl.distributed.initialize("kv_ip_config.txt")
         dist_g = dgl.distributed.DistGraph(
-            graph_name, part_config=part_file)
+            HOMOGENEOUS_GRAPH_NAME, part_config=partition_file)
 
         sar_g = sar.convert_dist_graph(dist_g)
-        print(sar_g.graph_shards[0].graph.ndata)
-        assert len(sar_g.graph_shards) == dist_g.get_partition_book().num_partitions()
+        assert len(sar_g.graph_shard_managers[0].graph_shards) == dist_g.get_partition_book().num_partitions()
         assert dist_g.num_edges() == sar_g.num_edges()
-        # this check fails (1000 != 2000)
-        #assert dist_g.num_nodes() == sar_g.num_nodes()
+        assert dist_g.num_nodes() == sar_g.num_nodes()
+        assert dist_g.ntypes == sar_g.ntypes
+        assert dist_g.etypes == sar_g.etypes
+
+    run_workers(convert_dist_graph, fixture_env, world_size, backend=backend)
